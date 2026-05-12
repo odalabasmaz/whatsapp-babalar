@@ -1,0 +1,71 @@
+import asyncio
+import json
+
+from openai import AsyncOpenAI, RateLimitError
+from app.config import settings
+
+_client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+_CATEGORIES = [
+    "araba", "saglik", "resmi-daire", "cocuk", "ikinci-el",
+    "konut", "yemek-restoran", "is-kariyer", "egitim", "spor-eglence", "genel",
+]
+
+_CATS_STR = ", ".join(_CATEGORIES)
+
+_CHUNK_SIZE = 25  # messages per API call
+
+_SYSTEM = (
+    "Sana numaralı WhatsApp mesajları verilecek. "
+    "Her mesajı şu kategorilerden birine ata: " + _CATS_STR + ".\n"
+    "Sadece JSON array döndür, örnek: [\"yemek-restoran\", \"genel\", \"araba\"]. "
+    "Başka hiçbir şey yazma."
+)
+
+_SEM = asyncio.Semaphore(5)  # max 5 concurrent chunk calls
+
+
+async def _categorize_chunk(contents: list[str]) -> list[str]:
+    numbered = "\n".join(f"{i+1}. {c[:500]}" for i, c in enumerate(contents))
+    async with _SEM:
+        for attempt in range(4):
+            try:
+                response = await _client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    max_tokens=200,
+                    temperature=0,
+                    messages=[
+                        {"role": "system", "content": _SYSTEM},
+                        {"role": "user", "content": numbered},
+                    ],
+                )
+                raw = response.choices[0].message.content.strip()
+                parsed = json.loads(raw)
+                if isinstance(parsed, list) and len(parsed) == len(contents):
+                    return [c.strip().lower() if c.strip().lower() in _CATEGORIES else "genel" for c in parsed]
+                break
+            except RateLimitError as e:
+                # Daily limit exhausted — retrying won't help, fail immediately
+                if "requests per day" in str(e) or "RPD" in str(e):
+                    raise
+                if attempt == 3:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+            except json.JSONDecodeError:
+                break
+            except Exception:
+                if attempt == 3:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+    return ["genel"] * len(contents)
+
+
+async def categorize(content: str) -> str:
+    results = await _categorize_chunk([content])
+    return results[0]
+
+
+async def categorize_batch(contents: list[str]) -> list[str]:
+    chunks = [contents[i:i + _CHUNK_SIZE] for i in range(0, len(contents), _CHUNK_SIZE)]
+    results = await asyncio.gather(*[_categorize_chunk(chunk) for chunk in chunks])
+    return [cat for chunk_result in results for cat in chunk_result]

@@ -1,0 +1,16 @@
+.env
+deploy.config
+.claude/
+*.pyc
+__pycache__/
+.venv/
+dist/
+node_modules/
+ingestion-session/
+.wwebjs_auth/
+.wwebjs_cache/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+cdk.out/
+*.js.map
