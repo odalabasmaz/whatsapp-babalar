@@ -146,6 +146,18 @@ async def check_trigger(db: AsyncSession = Depends(get_db), _: None = Depends(ve
     return {"should_run": False, "group_id": None}
 
 
+class LogEntry(BaseModel):
+    level: str  # INFO | WARN | ERROR
+    message: str
+
+
+@router.post("/log")
+async def post_log(entry: LogEntry, _: None = Depends(verify_ingest_key)):
+    from app.services.log_buffer import append_log
+    append_log(entry.level, entry.message)
+    return {"ok": True}
+
+
 @router.post("/clear-force-run")
 async def clear_force_run(db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
     force = await db.get(AdminConfig, "force_run")

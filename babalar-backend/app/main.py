@@ -25,3 +25,8 @@ app.include_router(ingest.router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": APP_VERSION}
+
+
+@app.get("/api/health")
+async def api_health():
+    return {"status": "ok", "version": APP_VERSION}

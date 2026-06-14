@@ -1,5 +1,5 @@
 const { streamGroupMessages } = require("./whatsapp");
-const { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, clearForceRun, setIngestionStatus } = require("./api-client");
+const { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, clearForceRun, setIngestionStatus, postLog } = require("./api-client");
 
 const BATCH_SIZE = 100;
 
@@ -12,23 +12,27 @@ async function runIngestion(client, targetGroupId = null) {
   // by the next trigger poll while this run is in progress.
   await clearForceRun().catch(() => {});
 
-  console.log("[scheduler] Loading chats...");
+  const logInfo = (msg) => { console.log(msg); postLog("INFO", msg).catch(() => {}); };
+  const logWarn = (msg) => { console.warn(msg); postLog("WARN", msg).catch(() => {}); };
+  const logError = (msg) => { console.error(msg); postLog("ERROR", msg).catch(() => {}); };
+
+  logInfo("[scheduler] Loading chats...");
   const chats = await Promise.race([
     client.getChats(),
     new Promise((_, reject) => setTimeout(() => reject(new Error("getChats timeout after 15 minutes")), 900000)),
   ]);
   const groupChats = chats.filter((c) => c.isGroup);
-  console.log(`[scheduler] Found ${groupChats.length} groups.`);
+  logInfo(`[scheduler] Found ${groupChats.length} groups.`);
 
   // Discover all groups (save as inactive if new)
   for (const chat of groupChats) {
     try {
       await discoverGroups(chat.id._serialized, chat.name);
     } catch (err) {
-      console.warn(`[scheduler] Discovery failed for "${chat.name}":`, err.message);
+      logWarn(`[scheduler] Discovery failed for "${chat.name}": ${err.message}`);
     }
   }
-  console.log("[scheduler] Group discovery done. Only active groups will be ingested.");
+  logInfo("[scheduler] Group discovery done. Only active groups will be ingested.");
 
   // Fetch config and active groups
   let lookbackDays = 30;
@@ -37,19 +41,19 @@ async function runIngestion(client, targetGroupId = null) {
     lookbackDays = cfg.ingestion_lookback_days || 30;
     console.log(`[scheduler] Lookback: ${lookbackDays} days.`);
   } catch (err) {
-    console.warn("[scheduler] Could not fetch ingest config, defaulting to 30 days:", err.message);
+    logWarn(`[scheduler] Could not fetch ingest config, defaulting to 30 days: ${err.message}`);
   }
 
   let activeGroups = [];
   try {
     activeGroups = await getActiveGroups();
   } catch (err) {
-    console.error("[scheduler] Failed to fetch active groups:", err.message);
+    logError(`[scheduler] Failed to fetch active groups: ${err.message}`);
     return;
   }
 
   if (!activeGroups.length) {
-    console.log("[scheduler] No active groups. Activate groups from the admin panel.");
+    logInfo("[scheduler] No active groups. Activate groups from the admin panel.");
     return;
   }
 
@@ -62,7 +66,7 @@ async function runIngestion(client, targetGroupId = null) {
     return;
   }
 
-  console.log(`[scheduler] Processing ${groupsToProcess.length} group(s)${targetGroupId ? ` (targeted: ${targetGroupId})` : ""}.`);
+  logInfo(`[scheduler] Processing ${groupsToProcess.length} group(s)${targetGroupId ? ` (targeted: ${targetGroupId})` : ""}.`);
 
   const chatMap = {};
   for (const chat of groupChats) {
@@ -72,7 +76,7 @@ async function runIngestion(client, targetGroupId = null) {
   for (const group of groupsToProcess) {
     const chat = chatMap[group.wa_group_id];
     if (!chat) {
-      console.warn(`[scheduler] "${group.group_name}" not found in WhatsApp, skipping.`);
+      logWarn(`[scheduler] "${group.group_name}" not found in WhatsApp, skipping.`);
       continue;
     }
 
@@ -80,7 +84,7 @@ async function runIngestion(client, targetGroupId = null) {
       ? new Date(group.last_ingested_at)
       : new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
 
-    console.log(`[scheduler] Processing "${group.group_name}" (since: ${since.toISOString()})...`);
+    logInfo(`[scheduler] Processing "${group.group_name}" (since: ${since.toISOString().slice(0,10)})...`);
 
     try {
       await setIngestionStatus(group.wa_group_id).catch(() => {});
@@ -99,25 +103,25 @@ async function runIngestion(client, targetGroupId = null) {
         }
 
         if (pageCount % 10 === 0) {
-          const oldestInPage = page.length ? page[page.length - 1].sent_at : "?";
-          console.log(`[scheduler] "${group.group_name}": ${totalFetched} fetched, ${totalSaved} saved, oldest: ${oldestInPage}`);
+          const oldest = page.length ? page[page.length - 1].sent_at : "?";
+          logInfo(`[scheduler] "${group.group_name}": ${totalFetched} fetched, ${totalSaved} saved, oldest: ${oldest}`);
         }
       }
 
       if (totalFetched === 0) {
-        console.log(`[scheduler] "${group.group_name}": no new messages.`);
+        logInfo(`[scheduler] "${group.group_name}": no new messages.`);
       } else {
-        console.log(`[scheduler] "${group.group_name}": done. ${totalFetched} fetched, ${totalSaved} saved.`);
+        logInfo(`[scheduler] "${group.group_name}": done. ${totalFetched} fetched, ${totalSaved} saved.`);
       }
       await markGroupChecked(group.wa_group_id, group.group_name, runStartTime);
     } catch (err) {
-      console.error(`[scheduler] Error processing "${group.group_name}":`, err.message);
+      logError(`[scheduler] Error processing "${group.group_name}": ${err.message}`);
     } finally {
       await setIngestionStatus(null).catch(() => {});
     }
   }
 
-  console.log("[scheduler] Ingestion complete.");
+  logInfo("[scheduler] Ingestion complete.");
 }
 
 module.exports = { runIngestion };

@@ -6,7 +6,7 @@ import api from "../api/client";
 import { useThemeStore } from "../store/theme";
 import { useAuthStore } from "../store/auth";
 
-type Tab = "overview" | "groups" | "users" | "config" | "invites";
+type Tab = "overview" | "groups" | "users" | "config" | "invites" | "logs";
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "overview", label: "Genel Bakış", icon: "📊" },
@@ -14,6 +14,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "users", label: "Kullanıcılar", icon: "👥" },
   { id: "config", label: "Konfigürasyon", icon: "⚙️" },
   { id: "invites", label: "Davet Kodları", icon: "🎟️" },
+  { id: "logs", label: "Loglar", icon: "📋" },
 ];
 
 function StatCard({ label, value, sub }: { label: string; value: any; sub?: string }) {
@@ -157,6 +158,7 @@ export default function AdminPage() {
   const { data: qrData } = useQuery({ queryKey: ["admin-qr"], queryFn: () => api.get("/admin/qr").then((r) => r.data), refetchInterval: activeTab === "groups" ? 5000 : false });
   const { data: waStatus } = useQuery({ queryKey: ["whatsapp-status"], queryFn: () => api.get("/admin/whatsapp/status").then((r) => r.data), refetchInterval: activeTab === "groups" ? 10000 : false });
   const reconnectWA = useMutation({ mutationFn: () => api.post("/admin/whatsapp/reconnect"), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-qr"] }); qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); } });
+  const { data: logs, dataUpdatedAt: logsUpdatedAt } = useQuery({ queryKey: ["ingestion-logs"], queryFn: () => api.get("/admin/logs").then((r) => r.data as { ts: string; level: string; msg: string }[]), refetchInterval: activeTab === "logs" ? 3000 : false });
 
   const filterPreset = config?.group_filter_preset || "";
   const presetTerms = useMemo(
@@ -254,7 +256,7 @@ export default function AdminPage() {
             </svg>
           </Link>
           <div className="flex items-center gap-2">
-            <span className="text-xl">👨‍👦</span>
+            <img src="/logo.jpg" alt="Babalar" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
             <div>
               <h1 className="font-bold text-gray-900 dark:text-white text-base leading-none">Babalar Admin</h1>
               <p className="text-xs text-gray-400 mt-0.5 hidden sm:block">Yönetim Paneli</p>
@@ -708,6 +710,44 @@ export default function AdminPage() {
                   </div>
                 ))}
                 {!codes?.length && <p className="px-4 py-8 text-center text-sm text-gray-400">Davet kodu yok</p>}
+              </div>
+            </div>
+          )}
+          {activeTab === "logs" && (
+            <div className="p-4 sm:p-6 flex flex-col gap-4 h-full overflow-hidden">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ingestion Logları</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Her 3 saniyede güncellenir · Son güncelleme: {logsUpdatedAt ? new Date(logsUpdatedAt).toLocaleTimeString("tr-TR") : "—"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => qc.invalidateQueries({ queryKey: ["ingestion-logs"] })}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  ↻ Yenile
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto bg-gray-900 dark:bg-black rounded-xl border border-gray-700 dark:border-gray-800 p-3 font-mono text-xs leading-5">
+                {!logs?.length && (
+                  <p className="text-gray-500 italic p-2">Henüz log yok. İlk ingestion çalıştıktan sonra burada görünecek.</p>
+                )}
+                {[...(logs || [])].reverse().map((entry, i) => {
+                  const levelCls =
+                    entry.level === "ERROR" ? "text-red-400" :
+                    entry.level === "WARN" ? "text-yellow-400" :
+                    "text-green-400";
+                  const time = new Date(entry.ts).toLocaleTimeString("tr-TR", { hour12: false });
+                  const date = new Date(entry.ts).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
+                  return (
+                    <div key={i} className="flex gap-2 py-0.5 border-b border-gray-800 last:border-0">
+                      <span className="text-gray-500 flex-shrink-0 w-[105px]">{date} {time}</span>
+                      <span className={`flex-shrink-0 w-10 font-bold ${levelCls}`}>{entry.level.slice(0, 4)}</span>
+                      <span className="text-gray-200 break-all">{entry.msg}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

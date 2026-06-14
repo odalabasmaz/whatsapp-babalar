@@ -69,4 +69,10 @@ async function setWhatsAppStatus(status) {
   await http.post("/api/ingest/whatsapp-status", { status }, { timeout: 10000 });
 }
 
-module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR, checkReconnect, setWhatsAppStatus };
+async function postLog(level, message) {
+  try {
+    await http.post("/api/ingest/log", { level, message }, { timeout: 5000 });
+  } catch (_) {}
+}
+
+module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR, checkReconnect, setWhatsAppStatus, postLog };

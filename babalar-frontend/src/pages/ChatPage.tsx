@@ -216,7 +216,7 @@ export default function ChatPage() {
     <div className="flex flex-col h-full">
       <div className="px-5 py-5 border-b border-gray-200 dark:border-gray-800">
         <div className="flex items-center gap-2">
-          <span className="text-2xl">👨‍👦</span>
+          <img src="/logo.jpg" alt="Babalar" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
           <div>
             <p className="font-bold text-gray-900 dark:text-white text-lg leading-none">Babalar</p>
             <p className="text-gray-500 dark:text-gray-400 text-xs mt-0.5">Münih Topluluğu</p>

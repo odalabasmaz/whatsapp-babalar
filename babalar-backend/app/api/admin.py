@@ -326,3 +326,9 @@ async def user_stats(db: AsyncSession = Depends(get_db), _: User = Depends(get_a
         .limit(20)
     )
     return [{"username": r.username, "email": r.email, "total": int(r.total)} for r in rows]
+
+
+@router.get("/logs")
+async def get_ingestion_logs(_: User = Depends(get_admin_user)):
+    from app.services.log_buffer import get_logs
+    return get_logs()
