@@ -91,19 +91,18 @@ ENVIRONMENT=production
 LOG_LEVEL=INFO
 ENVEOF
 
-docker compose -f docker-compose.prod.yml build --no-cache
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d --build
 
-echo "[babalar] Waiting for backend..."
-for i in $(seq 1 24); do
-  if curl -sf http://localhost:8000/health; then
+echo "[babalar] Waiting for backend to be healthy..."
+for i in $(seq 1 36); do
+  if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
     echo "[babalar] Backend is ready."
     break
   fi
   sleep 5
 done
 
-docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+docker compose -f docker-compose.prod.yml exec -T backend python -m alembic upgrade head
 
 echo "[babalar] Setup complete."
 echo "[babalar] To create admin: docker compose -f docker-compose.prod.yml exec backend python -m app.cli setup"

@@ -15,4 +15,6 @@ data/
 .pytest_cache/
 .mypy_cache/
 cdk.out/
+cdk.context.json
 *.js.map
+babalar-frontend/src/**/*.js

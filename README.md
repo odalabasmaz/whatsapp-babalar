@@ -42,7 +42,8 @@ On first start, run migrations and admin setup:
 
 ```bash
 docker compose exec backend alembic upgrade head
-docker compose exec backend python -m app.cli setup
+docker compose exec backend python -m app.cli setup \
+  --email you@example.com --username admin --password yourpassword
 ```
 
 ### 3. Local URLs
@@ -80,7 +81,7 @@ If the connection drops, the ingestion container restarts automatically and gene
 
 ## AWS Deploy
 
-See **[docs/aws-deploy.md](aws-deploy.md)** for the full step-by-step guide (IAM setup, config, deploy, post-deploy).
+See **[docs/aws-deploy.md](docs/aws-deploy.md)** for the full step-by-step guide (IAM setup, config, deploy, post-deploy).
 
 **Quick start** (assumes prerequisites are met):
 
@@ -104,8 +105,8 @@ cp deploy.config.example deploy.config
 |----------|------|------|
 | EC2 t4g.small (Graviton2) | Backend + ingestion | ~$15/mo |
 | RDS t4g.micro PostgreSQL 16 | pgvector, private subnet | ~$13/mo |
-| ALB | HTTPS termination | ~$18/mo |
-| CloudFront + S3 | Frontend, Germany-only geo-restriction | ~$1/mo |
+| ALB | Routes CloudFront → EC2 (HTTP only, not public) | ~$18/mo |
+| CloudFront + S3 | Single entry point: frontend + `/api/*` proxy, Germany geo-restriction | ~$1/mo |
 | Secrets Manager | API keys, DB password | ~$2/mo |
 
 EC2 access is via **AWS SSM Session Manager** — no SSH, no open port 22.
@@ -146,11 +147,13 @@ babalar/
 │       ├── whatsapp.js     # whatsapp-web.js connection, QR management
 │       └── api-client.js   # Sends messages/status to backend
 ├── infrastructure/         # AWS CDK (Python)
-│   └── stacks/
-│       ├── network_stack.py   # VPC, ALB, Security Groups
-│       ├── database_stack.py  # RDS PostgreSQL
-│       ├── compute_stack.py   # EC2, ASG, user data
-│       └── frontend_stack.py  # S3, CloudFront
+│   ├── stacks/
+│   │   ├── network_stack.py   # VPC, Security Groups (ALB SG restricted to CloudFront IPs)
+│   │   ├── database_stack.py  # RDS PostgreSQL 16 (private subnet)
+│   │   ├── compute_stack.py   # EC2 ASG, ALB (HTTP-only, internal)
+│   │   └── frontend_stack.py  # S3 + CloudFront (/api/* → ALB, default → S3)
+│   ├── app.py                 # CDK entry point (infra stacks)
+│   └── app_frontend.py        # CDK entry point (frontend stack, separate to avoid dist/ at synth)
 ├── deploy.config.example   # Deploy config template
 ├── deploy.sh               # AWS deploy script
 ├── docker-compose.yml      # Local development
