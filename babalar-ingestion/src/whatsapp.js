@@ -32,7 +32,7 @@ async function initWhatsApp() {
     puppeteer: {
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
-      protocolTimeout: 600000, // 10 min — loading full group history can take a while
+      protocolTimeout: 0, // no CDP-level timeout — rely on app-level timeout in scheduler.js
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -82,6 +82,9 @@ async function initWhatsApp() {
   await new Promise((resolve) => {
     client.on("ready", async () => {
       console.log("[whatsapp] Connected. Waiting for sync (60s)...");
+      // Disable page-level timeouts — getChats() on large accounts can take many minutes.
+      // We rely on our own application-level timeout in scheduler.js instead.
+      try { client.pupPage.setDefaultTimeout(0); } catch (_) {}
       await new Promise((r) => setTimeout(r, 60000));
       console.log("[whatsapp] Ready.");
       resolve();
