@@ -141,7 +141,7 @@ get_alb_dns() {
 build_frontend() {
   local api_url="$1"
   local build_version
-  build_version=$(git -C "$SCRIPT_DIR" log -1 --format=%Y%m%d.%h 2>/dev/null || echo "dev")
+  build_version=$(git -C "$SCRIPT_DIR" log -1 --format="%cd.%h" --date=format:"%Y%m%d" 2>/dev/null || echo "dev")
   info "Building frontend (API: $api_url, version: $build_version)..."
   cd "$FRONTEND_DIR"
   npm ci --silent

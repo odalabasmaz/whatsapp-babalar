@@ -349,14 +349,12 @@ When you see `Setup complete.` at the end, move on to the next step.
 In the SSM session (while still connected):
 
 ```bash
-docker compose -f /app/docker-compose.prod.yml exec backend python -m app.cli setup
+sudo docker compose -f /app/docker-compose.prod.yml exec backend \
+  python -m app.cli setup \
+  --email you@example.com --username admin --password yourpassword
 ```
 
-This command:
-- Prompts for an admin username and password
-- Generates the first invite code
-
-Save the output — you'll share the invite code with your users.
+Save the invite code printed at the end — you'll share it with your users.
 
 ---
 
@@ -369,6 +367,76 @@ Save the output — you'll share the invite code with your users.
    - WhatsApp → Settings → Linked Devices → Link a Device
 
 Once connected, the ingestion service runs automatically every night at 02:00 UTC.
+
+---
+
+---
+
+## Day-to-day operations
+
+### Connect to EC2 via SSM
+
+> If you get "NoCredentials" or "Unable to locate credentials", your session has expired. Run `aws sso login --profile babalar` first.
+
+```bash
+# Get the instance ID (one-time lookup — save it)
+aws ec2 describe-instances \
+  --filters "Name=tag:aws:cloudformation:stack-name,Values=BabalarCompute" \
+  --query "Reservations[].Instances[].InstanceId" \
+  --output text --region eu-central-1 --profile babalar
+
+# Connect
+aws ssm start-session --target i-0abc1234def56789 \
+  --region eu-central-1 --profile babalar
+```
+
+Once connected, switch to root:
+
+```bash
+sudo -i
+```
+
+### Update backend or ingestion code (no CDK needed)
+
+```bash
+sudo -i
+cd /app && git pull
+BUILD_VERSION=$(git log -1 --format="%cd.%h" --date=format:"%Y%m%d") \
+  docker compose -f docker-compose.prod.yml up -d --build
+```
+
+To rebuild only one service (e.g. ingestion):
+
+```bash
+BUILD_VERSION=$(git log -1 --format="%cd.%h" --date=format:"%Y%m%d") \
+  docker compose -f docker-compose.prod.yml up -d --build ingestion
+```
+
+### Redeploy frontend only (from your local machine)
+
+```bash
+./deploy.sh --frontend-only
+```
+
+### View live logs
+
+```bash
+sudo -i
+# All services
+docker compose -f /app/docker-compose.prod.yml logs -f
+
+# Specific service
+docker compose -f /app/docker-compose.prod.yml logs -f ingestion
+docker compose -f /app/docker-compose.prod.yml logs -f backend
+```
+
+Ingestion logs are also visible in the **Admin panel → Loglar** tab without needing SSM.
+
+### Restart a service
+
+```bash
+sudo docker compose -f /app/docker-compose.prod.yml restart ingestion
+```
 
 ---
 

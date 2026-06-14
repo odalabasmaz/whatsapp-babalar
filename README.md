@@ -113,7 +113,7 @@ cp deploy.config.example deploy.config
 # aws ssm start-session --target <INSTANCE_ID> --region eu-central-1 --profile babalar
 # sudo -i
 # cd /app && git pull
-# BUILD_VERSION=$(git log -1 --format=%Y%m%d.%h) docker compose -f docker-compose.prod.yml up -d --build
+# BUILD_VERSION=$(git log -1 --format="%cd.%h" --date=format:"%Y%m%d") docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ### AWS Infrastructure
