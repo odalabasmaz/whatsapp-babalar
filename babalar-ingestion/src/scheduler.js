@@ -15,7 +15,7 @@ async function runIngestion(client, targetGroupId = null) {
   console.log("[scheduler] Loading chats...");
   const chats = await Promise.race([
     client.getChats(),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("getChats timeout after 5 minutes")), 300000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("getChats timeout after 15 minutes")), 900000)),
   ]);
   const groupChats = chats.filter((c) => c.isGroup);
   console.log(`[scheduler] Found ${groupChats.length} groups.`);

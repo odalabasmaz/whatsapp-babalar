@@ -81,8 +81,8 @@ async function initWhatsApp() {
 
   await new Promise((resolve) => {
     client.on("ready", async () => {
-      console.log("[whatsapp] Connected. Waiting for sync (10s)...");
-      await new Promise((r) => setTimeout(r, 10000));
+      console.log("[whatsapp] Connected. Waiting for sync (60s)...");
+      await new Promise((r) => setTimeout(r, 60000));
       console.log("[whatsapp] Ready.");
       resolve();
     });
