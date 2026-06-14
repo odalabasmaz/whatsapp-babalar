@@ -94,9 +94,25 @@ cp deploy.config.example deploy.config
 **Script options:**
 
 ```bash
-./deploy.sh --skip-secrets   # Skip re-uploading secrets (already exist)
-./deploy.sh --infra-only     # EC2/RDS only, skip frontend
-./deploy.sh --frontend-only  # Redeploy frontend only
+./deploy.sh                  # Full deploy: secrets + infra + frontend
+./deploy.sh --skip-secrets   # Skip re-uploading secrets (already in Secrets Manager)
+./deploy.sh --infra-only     # Infra only (VPC, EC2, RDS) — skip frontend build/deploy
+./deploy.sh --frontend-only  # Frontend only (build React + upload to S3/CloudFront)
+```
+
+**Common workflows:**
+
+```bash
+# Changed only frontend code
+./deploy.sh --frontend-only
+
+# Changed backend/infra, secrets already exist
+./deploy.sh --skip-secrets --infra-only
+
+# Update backend code on EC2 (no CDK needed — SSH/SSM into instance)
+# aws ssm start-session --target <INSTANCE_ID> --region eu-central-1 --profile babalar
+# sudo -i
+# cd /app && git pull && docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ### AWS Infrastructure
