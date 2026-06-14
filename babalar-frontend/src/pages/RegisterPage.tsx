@@ -36,7 +36,7 @@ export default function RegisterPage() {
 
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-5xl mb-3">👨‍👦</div>
+          <img src="/logo.jpg" alt="Babalar" className="w-24 h-24 rounded-full mx-auto mb-3 object-cover shadow-md" />
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Babalar</h1>
           <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">Münih Türk Topluluğu</p>
         </div>
