@@ -160,7 +160,7 @@ export default function AdminPage() {
   const filteredGroups = useMemo(() => {
     if (!groups) return [];
     const q = groupFilter.toLowerCase();
-    const filtered = groups.filter((g: any) => g.is_active && g.name.toLowerCase().includes(q));
+    const filtered = groups.filter((g: any) => g.name.toLowerCase().includes(q));
     const dir = sortDir === "asc" ? 1 : -1;
     return [...filtered].sort((a: any, b: any) => {
       if (sortKey === "message_count") {
@@ -440,14 +440,16 @@ export default function AdminPage() {
                     {filteredGroups.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
-                          {groups?.length === 0 ? "Henüz grup keşfedilmedi." : "Sonuç bulunamadı."}
+                          {groups?.length === 0
+                            ? <>Henüz grup keşfedilmedi. <span className="text-blue-500 cursor-pointer" onClick={() => fetchAll.mutate()}>↓ Hepsini Çek</span> butonuna bas.</>
+                            : "Sonuç bulunamadı."}
                         </td>
                       </tr>
                     )}
                     {filteredGroups.map((g: any) => {
                       const status = ingestionStatus(g);
                       return (
-                        <tr key={g.id} className="border-b border-gray-50 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                        <tr key={g.id} className={`border-b border-gray-50 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${!g.is_active ? "opacity-50" : ""}`}>
                           <td className="px-3 py-2.5 max-w-[180px]">
                             <p className="font-medium text-gray-800 dark:text-gray-200 truncate">{g.name}</p>
                           </td>
