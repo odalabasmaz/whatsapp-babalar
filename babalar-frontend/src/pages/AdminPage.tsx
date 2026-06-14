@@ -141,6 +141,8 @@ export default function AdminPage() {
   const [groupFilter, setGroupFilter] = useState("");
   const [sortKey, setSortKey] = useState<string>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [groupPage, setGroupPage] = useState(0);
+  const GROUP_PAGE_SIZE = 25;
   const { theme, toggle } = useThemeStore();
   const currentUser = useAuthStore((s) => s.user);
   const isOwner = currentUser?.role === "owner";
@@ -157,10 +159,20 @@ export default function AdminPage() {
   const reconnectWA = useMutation({ mutationFn: () => api.post("/admin/whatsapp/reconnect"), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-qr"] }); qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); } });
 
   const filterPreset = config?.group_filter_preset || "";
+  const presetTerms = useMemo(
+    () => filterPreset.split(",").map((t: string) => t.trim().toLowerCase()).filter(Boolean),
+    [filterPreset]
+  );
+
   const filteredGroups = useMemo(() => {
     if (!groups) return [];
     const q = groupFilter.toLowerCase();
-    const filtered = groups.filter((g: any) => g.name.toLowerCase().includes(q));
+    const filtered = groups.filter((g: any) => {
+      const name = g.name.toLowerCase();
+      const matchesSearch = !q || name.includes(q);
+      const matchesPreset = presetTerms.length === 0 || presetTerms.some((t: string) => name.includes(t));
+      return matchesSearch && matchesPreset;
+    });
     const dir = sortDir === "asc" ? 1 : -1;
     return [...filtered].sort((a: any, b: any) => {
       if (sortKey === "message_count") {
@@ -175,7 +187,10 @@ export default function AdminPage() {
       const bv = sortKey === "status" ? ingestionStatus(b).label : (b[sortKey] ?? "");
       return dir * av.localeCompare(bv, "tr", { sensitivity: "base" });
     });
-  }, [groups, groupFilter, sortKey, sortDir]);
+  }, [groups, groupFilter, presetTerms, sortKey, sortDir]);
+
+  const totalPages = Math.ceil(filteredGroups.length / GROUP_PAGE_SIZE);
+  const pagedGroups = filteredGroups.slice(groupPage * GROUP_PAGE_SIZE, (groupPage + 1) * GROUP_PAGE_SIZE);
 
   const updateConfig = useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => api.put(`/admin/config/${key}`, { value }),
@@ -402,7 +417,7 @@ export default function AdminPage() {
                 <input
                   type="text" placeholder="Grup adında ara..."
                   value={groupFilter}
-                  onChange={(e) => setGroupFilter(e.target.value)}
+                  onChange={(e) => { setGroupFilter(e.target.value); setGroupPage(0); }}
                   className="flex-1 min-w-40 border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 placeholder-gray-400"
                 />
                 <button
@@ -437,7 +452,7 @@ export default function AdminPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredGroups.length === 0 && (
+                    {pagedGroups.length === 0 && (
                       <tr>
                         <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">
                           {groups?.length === 0
@@ -446,7 +461,7 @@ export default function AdminPage() {
                         </td>
                       </tr>
                     )}
-                    {filteredGroups.map((g: any) => {
+                    {pagedGroups.map((g: any) => {
                       const status = ingestionStatus(g);
                       return (
                         <tr key={g.id} className={`border-b border-gray-50 dark:border-gray-700/50 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors ${!g.is_active ? "opacity-50" : ""}`}>
@@ -502,6 +517,41 @@ export default function AdminPage() {
                   </tbody>
                 </table>
               </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
+                  <span>{filteredGroups.length} grup · Sayfa {groupPage + 1}/{totalPages}</span>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setGroupPage(0)}
+                      disabled={groupPage === 0}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 transition-colors"
+                    >«</button>
+                    <button
+                      onClick={() => setGroupPage(p => p - 1)}
+                      disabled={groupPage === 0}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 transition-colors"
+                    >‹</button>
+                    {Array.from({ length: totalPages }, (_, i) => i)
+                      .filter(i => Math.abs(i - groupPage) <= 2)
+                      .map(i => (
+                        <button key={i} onClick={() => setGroupPage(i)}
+                          className={`px-2.5 py-1 rounded-lg transition-colors ${i === groupPage ? "bg-green-600 text-white" : "hover:bg-gray-100 dark:hover:bg-gray-800"}`}
+                        >{i + 1}</button>
+                      ))}
+                    <button
+                      onClick={() => setGroupPage(p => p + 1)}
+                      disabled={groupPage >= totalPages - 1}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 transition-colors"
+                    >›</button>
+                    <button
+                      onClick={() => setGroupPage(totalPages - 1)}
+                      disabled={groupPage >= totalPages - 1}
+                      className="px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 transition-colors"
+                    >»</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
