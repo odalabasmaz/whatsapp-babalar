@@ -713,6 +713,9 @@ export default function AdminPage() {
           )}
         </main>
       </div>
+      <div className="text-center py-2 text-xs text-gray-400 dark:text-gray-600 select-none">
+        v{import.meta.env.VITE_APP_VERSION || "dev"}
+      </div>
     </div>
   );
 }

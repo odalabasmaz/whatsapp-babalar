@@ -8,7 +8,7 @@ const CRON = process.env.INGEST_CRON || "0 2 * * *";
 const POLL_INTERVAL_MS = 30_000;
 
 async function main() {
-  console.log("[babalar-ingestion] Starting...");
+  console.log(`[babalar-ingestion] Starting... (version: ${process.env.APP_VERSION || "dev"})`);
   const client = await initWhatsApp();
 
   let isRunning = false;

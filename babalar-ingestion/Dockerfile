@@ -1,5 +1,8 @@
 FROM node:20-slim
 
+ARG BUILD_VERSION=dev
+ENV APP_VERSION=$BUILD_VERSION
+
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-noto \

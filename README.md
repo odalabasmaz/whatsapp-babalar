@@ -109,10 +109,11 @@ cp deploy.config.example deploy.config
 # Changed backend/infra, secrets already exist
 ./deploy.sh --skip-secrets --infra-only
 
-# Update backend code on EC2 (no CDK needed — SSH/SSM into instance)
+# Update backend/ingestion code on EC2 (no CDK needed — SSH/SSM into instance)
 # aws ssm start-session --target <INSTANCE_ID> --region eu-central-1 --profile babalar
 # sudo -i
-# cd /app && git pull && docker compose -f docker-compose.prod.yml up -d --build
+# cd /app && git pull
+# BUILD_VERSION=$(git log -1 --format=%Y%m%d.%h) docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 ### AWS Infrastructure
