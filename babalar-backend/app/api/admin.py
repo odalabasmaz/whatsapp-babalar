@@ -58,10 +58,10 @@ async def delete_invite_code(code_id: str, db: AsyncSession = Depends(get_db), _
     import uuid
     row = await db.get(InviteCode, uuid.UUID(code_id))
     if not row:
-        raise HTTPException(status_code=404, detail="Kod bulunamadı")
+        raise HTTPException(status_code=404, detail="Code not found")
     row.is_active = False
     await db.commit()
-    return {"message": "Deaktif edildi"}
+    return {"message": "Deactivated"}
 
 
 @router.get("/users")
@@ -106,18 +106,18 @@ async def update_user_role(
 ):
     import uuid as _uuid
     if req.role not in ("member", "admin", "owner"):
-        raise HTTPException(status_code=400, detail="Geçersiz rol")
+        raise HTTPException(status_code=400, detail="Invalid role")
 
     target = await db.get(User, _uuid.UUID(user_id))
     if not target:
-        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+        raise HTTPException(status_code=404, detail="User not found")
     if str(target.id) == str(current_user.id):
-        raise HTTPException(status_code=400, detail="Kendi rolünü değiştiremezsin")
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
 
     # Only owner can touch owner-level (promote to owner or demote an owner)
     if req.role == "owner" or target.role == "owner":
         if current_user.role != "owner":
-            raise HTTPException(status_code=403, detail="Bu işlem için owner yetkisi gerekli")
+            raise HTTPException(status_code=403, detail="Owner permission required for this action")
 
     target.role = req.role
     await db.commit()
@@ -138,7 +138,7 @@ async def update_user_limit(
     import uuid as _uuid
     target = await db.get(User, _uuid.UUID(user_id))
     if not target:
-        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+        raise HTTPException(status_code=404, detail="User not found")
     target.daily_limit_override = req.daily_limit_override
     await db.commit()
     return {"id": user_id, "daily_limit_override": target.daily_limit_override}
@@ -191,7 +191,7 @@ async def toggle_group(group_id: str, db: AsyncSession = Depends(get_db), _: Use
     import uuid
     group = await db.get(WaGroup, uuid.UUID(group_id))
     if not group:
-        raise HTTPException(status_code=404, detail="Grup bulunamadı")
+        raise HTTPException(status_code=404, detail="Group not found")
     group.is_active = not group.is_active
     await db.commit()
     return {"id": str(group.id), "name": group.group_name, "is_active": group.is_active}
@@ -213,7 +213,7 @@ async def trigger_fetch(group_id: str, db: AsyncSession = Depends(get_db), _: Us
     import uuid
     group = await db.get(WaGroup, uuid.UUID(group_id))
     if not group:
-        raise HTTPException(status_code=404, detail="Grup bulunamadı")
+        raise HTTPException(status_code=404, detail="Group not found")
     row = await db.get(AdminConfig, "force_run")
     if row:
         row.value = group.wa_group_id
@@ -228,7 +228,7 @@ async def delete_group_messages(group_id: str, db: AsyncSession = Depends(get_db
     import uuid
     group = await db.get(WaGroup, uuid.UUID(group_id))
     if not group:
-        raise HTTPException(status_code=404, detail="Grup bulunamadı")
+        raise HTTPException(status_code=404, detail="Group not found")
     await db.execute(delete(Message).where(Message.group_id == group.id))
     group.last_ingested_at = None
     await db.commit()
@@ -256,6 +256,30 @@ async def bulk_set_active(req: BulkSetActive, db: AsyncSession = Depends(get_db)
 async def get_whatsapp_qr(db: AsyncSession = Depends(get_db), _: User = Depends(get_admin_user)):
     row = await db.get(AdminConfig, "whatsapp_qr")
     return {"data_url": row.value if row else None}
+
+
+@router.get("/whatsapp/status")
+async def get_whatsapp_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_admin_user)):
+    qr = await db.get(AdminConfig, "whatsapp_qr")
+    if qr:
+        return {"status": "waiting_qr"}
+    status = await db.get(AdminConfig, "whatsapp_status")
+    return {"status": status.value if status else "unknown"}
+
+
+@router.post("/whatsapp/reconnect")
+async def request_whatsapp_reconnect(db: AsyncSession = Depends(get_db), _: User = Depends(get_admin_user)):
+    row = await db.get(AdminConfig, "whatsapp_reconnect")
+    if row:
+        row.value = "1"
+    else:
+        db.add(AdminConfig(key="whatsapp_reconnect", value="1"))
+    # Clear stale QR if any
+    qr_row = await db.get(AdminConfig, "whatsapp_qr")
+    if qr_row:
+        await db.delete(qr_row)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/stats")

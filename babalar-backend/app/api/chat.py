@@ -48,7 +48,7 @@ async def ask(
     db: AsyncSession = Depends(get_db),
 ):
     if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Soru boş olamaz")
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     if not current_user.is_admin:
         allowed, reason = await rate_limiter.check_and_increment(db, current_user.id, current_user.daily_limit_override)

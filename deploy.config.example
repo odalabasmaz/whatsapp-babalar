@@ -1,55 +1,51 @@
 # =============================================================================
 # Babalar — AWS Deployment Config
 # =============================================================================
-# Kullanım:
+# Usage:
 #   cp deploy.config.example deploy.config
-#   deploy.config'i düzenle (CHANGE_ME değerlerini doldur)
+#   Fill in all CHANGE_ME values in deploy.config
 #   ./deploy.sh
 #
-# deploy.config .gitignore'a eklidir — commit'e girmez.
+# deploy.config is in .gitignore — it will never be committed to the repo.
 # =============================================================================
 
 # ── AWS ───────────────────────────────────────────────────────────────────────
-# `aws configure --profile <profil>` ile ayarlanmış profil adı.
-# Varsayılan profil için "default" yaz.
-AWS_PROFILE=default
+# Profile name configured via `aws configure --profile <name>`.
+# Use "default" if you didn't specify a profile name.
+AWS_PROFILE=babalar
 AWS_REGION=eu-central-1
-# AWS Console → sağ üst köşe → hesap numarası (tire olmadan, 12 hane)
+# 12-digit account number shown in the top-right corner of the AWS Console
 AWS_ACCOUNT_ID=CHANGE_ME
 
 # ── Repo ──────────────────────────────────────────────────────────────────────
-# EC2'nin clone'layacağı repo URL'i (public repo veya deploy key ile private)
+# URL of the repo the EC2 instance will clone on startup
 REPO_URL=https://github.com/YOUR_ORG/babalar.git
-
-# ── EC2 ───────────────────────────────────────────────────────────────────────
-# EC2 → Key Pairs'te mevcut bir key pair adı.
-# Yoksa: aws ec2 create-key-pair --key-name babalar-key --query KeyMaterial --output text > babalar-key.pem
-EC2_KEY_PAIR=babalar-key
 
 # ── Domain & SSL ──────────────────────────────────────────────────────────────
 DOMAIN=babalar.example.com
 
-# ACM sertifikası CloudFront için us-east-1'de olmalıdır.
+# ACM certificate must be in us-east-1 (CloudFront requirement).
 # 1. AWS Console → Certificate Manager → Region: us-east-1 → Request certificate
-# 2. Domain: babalar.example.com (ve isteğe bağlı *.babalar.example.com)
-# 3. DNS validation → CNAME'leri domain sağlayıcına ekle → issued bekle
-# 4. Sertifika ARN'ini buraya yapıştır:
+# 2. Domain: babalar.example.com
+# 3. DNS validation → add CNAMEs to your domain provider → wait for "Issued"
+# 4. Paste the certificate ARN below:
 ACM_CERT_ARN=arn:aws:acm:us-east-1:CHANGE_ME:certificate/CHANGE_ME
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
-# Bu değerler AWS Secrets Manager'a yüklenir.
-# Repo'ya commit etme — deploy.config .gitignore'da.
+# These values are uploaded to AWS Secrets Manager by deploy.sh.
+# Never commit this file — it's in .gitignore.
 
-# OpenAI API anahtarı (platform.openai.com → API Keys)
+# OpenAI API key (platform.openai.com → API Keys)
 OPENAI_API_KEY=sk-CHANGE_ME
 
-# JWT signing secret — en az 32 karakter rastgele string
-# Üretmek için: openssl rand -hex 32
+# JWT signing secret — at least 32 random characters
+# Generate: openssl rand -hex 32
 JWT_SECRET=CHANGE_ME
 
-# Ingestion servisi ile backend arasındaki dahili API key
-# Üretmek için: openssl rand -hex 32
+# Internal API key shared between the ingestion service and the backend
+# Generate: openssl rand -hex 32
 INGEST_API_KEY=CHANGE_ME
 
-# PostgreSQL şifresi — güçlü bir şifre seç
+# PostgreSQL password
+# Generate: openssl rand -hex 16
 DB_PASSWORD=CHANGE_ME

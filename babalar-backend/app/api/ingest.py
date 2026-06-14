@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
 def verify_ingest_key(x_ingest_key: str = Header(...)):
     if x_ingest_key != settings.ingest_api_key:
-        raise HTTPException(status_code=401, detail="Geçersiz ingest API key")
+        raise HTTPException(status_code=401, detail="Invalid ingest API key")
 
 
 class RawMessage(BaseModel):
@@ -37,7 +37,7 @@ async def ingest_messages(
     db: AsyncSession = Depends(get_db),
     _: None = Depends(verify_ingest_key),
 ):
-    # Grubu upsert et
+    # Upsert the group
     result = await db.execute(select(WaGroup).where(WaGroup.wa_group_id == req.wa_group_id))
     group = result.scalar_one_or_none()
     if not group:
@@ -119,7 +119,7 @@ async def discover_group(
         group = WaGroup(wa_group_id=req.wa_group_id, group_name=req.group_name, is_active=False)
         db.add(group)
     else:
-        group.group_name = req.group_name  # isim değişmiş olabilir
+        group.group_name = req.group_name  # name may have changed
     await db.commit()
     return {"wa_group_id": group.wa_group_id, "is_active": group.is_active}
 
@@ -183,6 +183,31 @@ async def clear_qr(db: AsyncSession = Depends(get_db), _: None = Depends(verify_
 async def get_qr(db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
     row = await db.get(AdminConfig, "whatsapp_qr")
     return {"data_url": row.value if row else None}
+
+
+@router.get("/reconnect-requested")
+async def check_reconnect(db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
+    row = await db.get(AdminConfig, "whatsapp_reconnect")
+    if row:
+        await db.delete(row)
+        await db.commit()
+        return {"reconnect": True}
+    return {"reconnect": False}
+
+
+class WhatsAppStatusUpdate(BaseModel):
+    status: str  # "connected" | "disconnected" | "auth_failure"
+
+
+@router.post("/whatsapp-status")
+async def update_whatsapp_status(req: WhatsAppStatusUpdate, db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
+    row = await db.get(AdminConfig, "whatsapp_status")
+    if row:
+        row.value = req.status
+    else:
+        db.add(AdminConfig(key="whatsapp_status", value=req.status))
+    await db.commit()
+    return {"ok": True}
 
 
 class StatusRequest(BaseModel):

@@ -1,5 +1,6 @@
 .env
 deploy.config
+.idea/
 .claude/
 *.pyc
 __pycache__/
@@ -7,6 +8,7 @@ __pycache__/
 dist/
 node_modules/
 ingestion-session/
+data/
 .wwebjs_auth/
 .wwebjs_cache/
 *.egg-info/

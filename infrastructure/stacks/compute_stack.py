@@ -3,7 +3,6 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_elasticloadbalancingv2 as elbv2,
-    aws_elasticloadbalancingv2_targets as targets,
     aws_autoscaling as asg,
     CfnOutput,
 )
@@ -17,21 +16,32 @@ class ComputeStack(Stack):
         id: str,
         vpc: ec2.Vpc,
         ec2_sg: ec2.SecurityGroup,
-        alb: elbv2.ApplicationLoadBalancer,
+        alb_sg: ec2.SecurityGroup,
         db_endpoint: str,
         **kwargs,
     ):
         super().__init__(scope, id, **kwargs)
 
-        repo_url   = self.node.try_get_context("repo_url")  or ""
-        key_pair   = self.node.try_get_context("key_pair")  or ""
-        region     = self.region
+        repo_url = self.node.try_get_context("repo_url") or ""
+        region   = self.region
 
-        # IAM Role — Secrets Manager okuma + CloudWatch Logs
+        # ALB lives here to avoid a cross-stack cycle with NetworkStack
+        self.alb = elbv2.ApplicationLoadBalancer(
+            self, "ALB",
+            vpc=vpc,
+            internet_facing=True,
+            security_group=alb_sg,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+
+        # IAM Role — SSM + Secrets Manager + CloudWatch Logs
         role = iam.Role(
             self, "EC2Role",
             assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
-            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchLogsFullAccess")],
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchLogsFullAccess"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSSMManagedInstanceCore"),
+            ],
         )
         role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
@@ -42,25 +52,21 @@ class ComputeStack(Stack):
         user_data.add_commands(f"""
 set -euo pipefail
 exec > /var/log/babalar-setup.log 2>&1
-echo "[babalar] EC2 setup başlıyor..."
+echo "[babalar] Starting EC2 setup..."
 
-# Paket kurulumu
 dnf update -y
 dnf install -y docker git
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
-# Docker Compose v2 plugin (ARM64 / Graviton)
 mkdir -p /usr/local/lib/docker/cli-plugins
 curl -fsSL https://github.com/docker/compose/releases/download/v2.27.1/docker-compose-linux-aarch64 \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# Repo klonla
 git clone {repo_url} /app
 cd /app
 
-# Secrets Manager'dan değerleri oku
 get_secret() {{
   aws secretsmanager get-secret-value \
     --region {region} --secret-id "$1" \
@@ -72,7 +78,6 @@ OPENAI_API_KEY=$(get_secret babalar/openai-api-key)
 JWT_SECRET=$(get_secret babalar/jwt-secret)
 INGEST_API_KEY=$(get_secret babalar/ingest-api-key)
 
-# .env oluştur
 cat > /app/.env << ENVEOF
 DATABASE_URL=postgresql+asyncpg://babalar:${{DB_PASSWORD}}@{db_endpoint}:5432/babalar
 OPENAI_API_KEY=${{OPENAI_API_KEY}}
@@ -86,25 +91,22 @@ ENVIRONMENT=production
 LOG_LEVEL=INFO
 ENVEOF
 
-# Servisleri başlat
 docker compose -f docker-compose.prod.yml build --no-cache
 docker compose -f docker-compose.prod.yml up -d
 
-# Backend hazır olana kadar bekle
-echo "[babalar] Backend bekleniyor..."
+echo "[babalar] Waiting for backend..."
 for i in $(seq 1 24); do
   if curl -sf http://localhost:8000/health; then
-    echo "[babalar] Backend hazır."
+    echo "[babalar] Backend is ready."
     break
   fi
   sleep 5
 done
 
-# DB migration
 docker compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
 
-echo "[babalar] Setup tamamlandı."
-echo "[babalar] Admin kurmak için: docker compose -f docker-compose.prod.yml exec backend python -m app.cli setup"
+echo "[babalar] Setup complete."
+echo "[babalar] To create admin: docker compose -f docker-compose.prod.yml exec backend python -m app.cli setup"
 """)
 
         lt = ec2.LaunchTemplate(
@@ -114,7 +116,6 @@ echo "[babalar] Admin kurmak için: docker compose -f docker-compose.prod.yml ex
             security_group=ec2_sg,
             role=role,
             user_data=user_data,
-            key_pair=ec2.KeyPair.from_key_pair_name(self, "KeyPair", key_pair) if key_pair else None,
             block_devices=[
                 ec2.BlockDevice(
                     device_name="/dev/xvda",
@@ -142,9 +143,12 @@ echo "[babalar] Admin kurmak için: docker compose -f docker-compose.prod.yml ex
             health_check=elbv2.HealthCheck(path="/health", healthy_http_codes="200"),
         )
 
-        alb.add_listener("HTTP", port=80, default_action=elbv2.ListenerAction.redirect(
-            protocol="HTTPS", port="443", permanent=True,
-        ))
-        alb.add_listener("HTTPS", port=443, default_target_groups=[tg])
+        # HTTP only — CloudFront handles HTTPS termination, no ALB cert needed
+        self.alb.add_listener(
+            "HTTP",
+            port=80,
+            default_target_groups=[tg],
+        )
 
+        CfnOutput(self, "AlbDnsName", value=self.alb.load_balancer_dns_name)
         CfnOutput(self, "ASGName", value=self.asg.auto_scaling_group_name)

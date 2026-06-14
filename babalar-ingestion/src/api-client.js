@@ -60,4 +60,13 @@ async function clearQR() {
   await http.post("/api/ingest/clear-qr", {}, { timeout: 10000 });
 }
 
-module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR };
+async function checkReconnect() {
+  const res = await http.get("/api/ingest/reconnect-requested", { timeout: 10000 });
+  return res.data;
+}
+
+async function setWhatsAppStatus(status) {
+  await http.post("/api/ingest/whatsapp-status", { status }, { timeout: 10000 });
+}
+
+module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR, checkReconnect, setWhatsAppStatus };

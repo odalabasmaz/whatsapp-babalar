@@ -3,7 +3,7 @@ const qrcode = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const fs = require("fs");
 const path = require("path");
-const { setQR, clearQR } = require("./api-client");
+const { setQR, clearQR, setWhatsAppStatus } = require("./api-client");
 
 function clearChromiumLocks(sessionPath) {
   const patterns = ["SingletonLock", "SingletonCookie", "SingletonSocket"];
@@ -60,15 +60,18 @@ async function initWhatsApp() {
   client.on("authenticated", async () => {
     console.log("[whatsapp] Session authenticated.");
     try { await clearQR(); } catch (_) {}
+    try { await setWhatsAppStatus("connected"); } catch (_) {}
   });
 
-  client.on("auth_failure", (msg) => {
+  client.on("auth_failure", async (msg) => {
     console.error("[whatsapp] Auth failure:", msg);
+    try { await setWhatsAppStatus("auth_failure"); } catch (_) {}
     process.exit(1);
   });
 
-  client.on("disconnected", (reason) => {
+  client.on("disconnected", async (reason) => {
     console.warn("[whatsapp] Disconnected:", reason);
+    try { await setWhatsAppStatus("disconnected"); } catch (_) {}
     if (reason === "LOGOUT") {
       console.warn("[whatsapp] LOGOUT detected — clearing session and restarting...");
       try { fs.rmSync("./session", { recursive: true, force: true }); } catch (_) {}

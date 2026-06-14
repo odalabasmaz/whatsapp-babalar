@@ -16,10 +16,10 @@ _CATS_STR = ", ".join(_CATEGORIES)
 _CHUNK_SIZE = 25  # messages per API call
 
 _SYSTEM = (
-    "Sana numaralı WhatsApp mesajları verilecek. "
-    "Her mesajı şu kategorilerden birine ata: " + _CATS_STR + ".\n"
-    "Sadece JSON array döndür, örnek: [\"yemek-restoran\", \"genel\", \"araba\"]. "
-    "Başka hiçbir şey yazma."
+    "You will be given numbered WhatsApp messages. "
+    "Assign each message to one of these categories: " + _CATS_STR + ".\n"
+    "Return only a JSON array, example: [\"yemek-restoran\", \"genel\", \"araba\"]. "
+    "Write nothing else."
 )
 
 _SEM = asyncio.Semaphore(5)  # max 5 concurrent chunk calls

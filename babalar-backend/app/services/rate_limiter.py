@@ -19,13 +19,13 @@ async def check_and_increment(db: AsyncSession, user_id: uuid.UUID, limit_overri
     user_limit = limit_override if limit_override is not None else await _get_config(db, "user_daily_limit", 5)
     total_limit = await _get_config(db, "total_daily_limit", 5000)
 
-    # Toplam günlük kullanım
+    # Daily total usage
     total_row = await db.execute(select(DailyTotalUsage).where(DailyTotalUsage.usage_date == today))
     total = total_row.scalar_one_or_none()
     if total and total.count >= total_limit:
         return False, f"Günlük toplam limit ({total_limit}) aşıldı. Yarın tekrar dene."
 
-    # Kullanıcı günlük kullanım
+    # Per-user daily usage
     user_row = await db.execute(
         select(UserDailyUsage).where(UserDailyUsage.user_id == user_id, UserDailyUsage.usage_date == today)
     )
@@ -33,7 +33,7 @@ async def check_and_increment(db: AsyncSession, user_id: uuid.UUID, limit_overri
     if usage and usage.count >= user_limit:
         return False, f"Günlük kişisel limitin ({user_limit} soru) doldu. Yarın tekrar dene."
 
-    # Sayaçları artır (upsert)
+    # Increment counters (upsert)
     await db.execute(
         text("""
             INSERT INTO user_daily_usage (user_id, usage_date, count)

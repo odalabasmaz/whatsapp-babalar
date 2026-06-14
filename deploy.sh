@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Babalar — AWS Deploy Script
-# Kullanım: ./deploy.sh [--skip-secrets] [--infra-only] [--frontend-only]
+# Usage: ./deploy.sh [--skip-secrets] [--infra-only] [--frontend-only]
 # =============================================================================
 set -euo pipefail
 
@@ -22,22 +22,22 @@ for arg in "$@"; do
   esac
 done
 
-# ── Renk çıktısı ──────────────────────────────────────────────────────────────
+# ── Output helpers ─────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()    { echo -e "${CYAN}[•]${NC} $*"; }
 success() { echo -e "${GREEN}[✓]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 error()   { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 
-# ── Config yükle ──────────────────────────────────────────────────────────────
-[[ -f "$CONFIG_FILE" ]] || error "deploy.config bulunamadı. Önce: cp deploy.config.example deploy.config"
+# ── Load config ────────────────────────────────────────────────────────────────
+[[ -f "$CONFIG_FILE" ]] || error "deploy.config not found. Run: cp deploy.config.example deploy.config"
 # shellcheck source=/dev/null
 source "$CONFIG_FILE"
 
-# ── Config doğrula ────────────────────────────────────────────────────────────
+# ── Validate config ────────────────────────────────────────────────────────────
 validate_config() {
   local missing=()
-  for var in AWS_PROFILE AWS_REGION AWS_ACCOUNT_ID REPO_URL EC2_KEY_PAIR \
+  for var in AWS_PROFILE AWS_REGION AWS_ACCOUNT_ID REPO_URL \
              DOMAIN ACM_CERT_ARN OPENAI_API_KEY JWT_SECRET INGEST_API_KEY DB_PASSWORD; do
     local val="${!var:-}"
     if [[ -z "$val" || "$val" == *"CHANGE_ME"* ]]; then
@@ -45,93 +45,93 @@ validate_config() {
     fi
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
-    error "deploy.config içinde doldurulmamış değerler var:\n  ${missing[*]}"
+    error "Unfilled values in deploy.config:\n  ${missing[*]}"
   fi
 }
 
-# ── Araç kontrolü ─────────────────────────────────────────────────────────────
+# ── Check prerequisites ────────────────────────────────────────────────────────
 check_prerequisites() {
-  info "Bağımlılıklar kontrol ediliyor..."
+  info "Checking prerequisites..."
   local missing=()
-  command -v aws    &>/dev/null || missing+=("aws-cli")
-  command -v cdk    &>/dev/null || missing+=("aws-cdk (npm install -g aws-cdk)")
-  command -v node   &>/dev/null || missing+=("node")
+  command -v aws     &>/dev/null || missing+=("aws-cli")
+  command -v cdk     &>/dev/null || missing+=("aws-cdk (npm install -g aws-cdk)")
+  command -v node    &>/dev/null || missing+=("node")
   command -v python3 &>/dev/null || missing+=("python3")
-  command -v npm    &>/dev/null || missing+=("npm")
+  command -v npm     &>/dev/null || missing+=("npm")
   if [[ ${#missing[@]} -gt 0 ]]; then
-    error "Eksik araçlar: ${missing[*]}"
+    error "Missing tools: ${missing[*]}"
   fi
-  success "Tüm araçlar mevcut."
+  success "All prerequisites met."
 }
 
-# ── AWS Secrets Manager ───────────────────────────────────────────────────────
+# ── AWS Secrets Manager ────────────────────────────────────────────────────────
 upsert_secret() {
   local name="$1" value="$2"
   if aws secretsmanager describe-secret --secret-id "$name" \
        --region "$AWS_REGION" --profile "$AWS_PROFILE" &>/dev/null; then
     aws secretsmanager put-secret-value \
       --secret-id "$name" --secret-string "$value" \
-      --region "$AWS_REGION" --profile "$AWS_PROFILE" --output none
-    warn "  Güncellendi: $name"
+      --region "$AWS_REGION" --profile "$AWS_PROFILE" --output text > /dev/null
+    warn "  Updated: $name"
   else
     aws secretsmanager create-secret \
       --name "$name" --secret-string "$value" \
-      --region "$AWS_REGION" --profile "$AWS_PROFILE" --output none
-    success "  Oluşturuldu: $name"
+      --region "$AWS_REGION" --profile "$AWS_PROFILE" --output text > /dev/null
+    success "  Created: $name"
   fi
 }
 
 create_secrets() {
-  info "Secrets Manager'a yükleniyor..."
-  # db-password JSON formatında (RDS Credentials şartı)
+  info "Uploading secrets to Secrets Manager..."
+  # db-password must be JSON (RDS Credentials requirement)
   upsert_secret "babalar/db-password"    "{\"password\":\"$DB_PASSWORD\"}"
   upsert_secret "babalar/openai-api-key" "$OPENAI_API_KEY"
   upsert_secret "babalar/jwt-secret"     "$JWT_SECRET"
   upsert_secret "babalar/ingest-api-key" "$INGEST_API_KEY"
-  success "Secrets hazır."
+  success "Secrets ready."
 }
 
-# ── CDK ───────────────────────────────────────────────────────────────────────
+# ── CDK ────────────────────────────────────────────────────────────────────────
 CDK_CONTEXT="-c region=$AWS_REGION \
   -c account=$AWS_ACCOUNT_ID \
   -c repo_url=$REPO_URL \
-  -c key_pair=$EC2_KEY_PAIR \
   -c domain=$DOMAIN \
   -c cert_arn=$ACM_CERT_ARN"
 
+VENV_DIR="$INFRA_DIR/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
+
+setup_venv() {
+  if [[ ! -f "$VENV_PYTHON" ]]; then
+    info "Creating Python virtual environment..."
+    python3 -m venv "$VENV_DIR"
+    success "Virtual environment created."
+  fi
+  info "Installing CDK Python dependencies..."
+  "$VENV_PYTHON" -m pip install --quiet --disable-pip-version-check -r "$INFRA_DIR/requirements.txt"
+  success "CDK dependencies ready."
+}
+
 cdk_run() {
+  JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 \
   AWS_PROFILE="$AWS_PROFILE" cdk "$@" $CDK_CONTEXT \
-    --app "python3 app.py" \
+    --app "$VENV_PYTHON app.py" \
     --require-approval never \
     --profile "$AWS_PROFILE"
 }
 
-bootstrap_cdk() {
-  info "CDK bootstrap kontrol ediliyor..."
-  if ! AWS_PROFILE="$AWS_PROFILE" aws cloudformation describe-stacks \
-      --stack-name "CDKToolkit" --region "$AWS_REGION" \
-      --profile "$AWS_PROFILE" &>/dev/null; then
-    info "CDK bootstrap çalıştırılıyor..."
-    AWS_PROFILE="$AWS_PROFILE" cdk bootstrap \
-      "aws://$AWS_ACCOUNT_ID/$AWS_REGION" \
-      --profile "$AWS_PROFILE"
-    success "CDK bootstrap tamamlandı."
-  else
-    success "CDK bootstrap zaten yapılmış."
-  fi
-}
-
 deploy_infra() {
-  info "Altyapı stack'leri deploy ediliyor (Network → Database → Compute)..."
+  info "Deploying infrastructure stacks (Network → Database → Compute)..."
   cd "$INFRA_DIR"
+  setup_venv
   cdk_run deploy BabalarNetwork BabalarDatabase BabalarCompute
-  success "Altyapı deploy tamamlandı."
+  success "Infrastructure deploy complete."
 }
 
 get_alb_dns() {
   cd "$INFRA_DIR"
   AWS_PROFILE="$AWS_PROFILE" aws cloudformation describe-stacks \
-    --stack-name BabalarNetwork \
+    --stack-name BabalarCompute \
     --region "$AWS_REGION" \
     --profile "$AWS_PROFILE" \
     --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" \
@@ -140,18 +140,24 @@ get_alb_dns() {
 
 build_frontend() {
   local api_url="$1"
-  info "Frontend build ediliyor (API: $api_url)..."
+  info "Building frontend (API: $api_url)..."
   cd "$FRONTEND_DIR"
   npm ci --silent
   VITE_API_URL="$api_url" npm run build
-  success "Frontend build tamamlandı."
+  success "Frontend build complete."
 }
 
 deploy_frontend() {
-  info "Frontend stack deploy ediliyor (S3 + CloudFront)..."
+  info "Deploying frontend stack (S3 + CloudFront)..."
   cd "$INFRA_DIR"
-  cdk_run deploy BabalarFrontend
-  success "Frontend deploy tamamlandı."
+  setup_venv
+  JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1 \
+  AWS_PROFILE="$AWS_PROFILE" cdk deploy BabalarFrontend $CDK_CONTEXT \
+    -c alb_dns="$ALB_DNS" \
+    --app "$VENV_PYTHON app_frontend.py" \
+    --require-approval never \
+    --profile "$AWS_PROFILE"
+  success "Frontend deploy complete."
 }
 
 get_cloudfront_url() {
@@ -164,7 +170,7 @@ get_cloudfront_url() {
     --output text
 }
 
-# ── Ana akış ──────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────────
 echo ""
 echo "  ======================================"
 echo "   Babalar AWS Deploy"
@@ -181,15 +187,13 @@ check_prerequisites
 
 if [[ "$FRONTEND_ONLY" == false ]]; then
   [[ "$SKIP_SECRETS" == false ]] && create_secrets
-  bootstrap_cdk
   deploy_infra
 fi
 
 ALB_DNS=$(get_alb_dns)
-[[ -z "$ALB_DNS" ]] && error "ALB DNS alınamadı. Infra stack'leri deploy edildi mi?"
+[[ -z "$ALB_DNS" ]] && error "Could not get ALB DNS. Are the infra stacks deployed?"
 info "ALB DNS: $ALB_DNS"
 
-# Frontend API URL: custom domain varsa onu kullan, yoksa ALB
 API_URL="https://$DOMAIN"
 build_frontend "$API_URL"
 
@@ -199,16 +203,28 @@ CLOUDFRONT_URL=$(get_cloudfront_url)
 
 echo ""
 echo "  ======================================"
-echo -e "   ${GREEN}Deploy Tamamlandı!${NC}"
+echo -e "   ${GREEN}Deploy Complete!${NC}"
 echo "  ======================================"
 echo "  CloudFront : $CLOUDFRONT_URL"
-echo "  ALB DNS    : $ALB_DNS"
 echo "  Domain     : https://$DOMAIN"
 echo "  ======================================"
 echo ""
-echo "  Sonraki adımlar:"
-echo "  1. DNS: $DOMAIN → $ALB_DNS (A/CNAME kaydı)"
-echo "  2. EC2 setup logu: ssh ec2-user@<ip> 'tail -f /var/log/babalar-setup.log'"
-echo "  3. Admin kur: ssh ec2-user@<ip> 'cd /app && docker compose -f docker-compose.prod.yml exec backend python -m app.cli setup'"
-echo "  4. WhatsApp: Admin paneli → Gruplar sekmesi → QR kodu tara"
+echo "  Next steps:"
+echo "  1. Add DNS record (CNAME, not A record):"
+echo "     $DOMAIN → ${CLOUDFRONT_URL#https://}"
+echo ""
+echo "  2. Get EC2 instance ID:"
+echo "     aws ec2 describe-instances \\"
+echo "       --filters Name=tag:aws:cloudformation:stack-name,Values=BabalarCompute \\"
+echo "       --query 'Reservations[].Instances[].InstanceId' --output text \\"
+echo "       --region $AWS_REGION --profile $AWS_PROFILE"
+echo ""
+echo "  3. Connect to EC2 (SSM — no SSH needed):"
+echo "     aws ssm start-session --target <INSTANCE_ID> --region $AWS_REGION --profile $AWS_PROFILE"
+echo "     → tail -f /var/log/babalar-setup.log"
+echo ""
+echo "  4. Create admin user (after setup completes):"
+echo "     docker compose -f /app/docker-compose.prod.yml exec backend python -m app.cli setup"
+echo ""
+echo "  5. Connect WhatsApp: Admin panel → Groups tab → scan QR code"
 echo ""

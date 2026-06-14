@@ -39,20 +39,20 @@ class TokenResponse(BaseModel):
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    # Invite kodu kontrol
+    # Validate invite code
     result = await db.execute(
         select(InviteCode).where(InviteCode.code == req.invite_code, InviteCode.is_active == True)
     )
     invite = result.scalar_one_or_none()
     if not invite or invite.use_count >= invite.max_uses:
-        raise HTTPException(status_code=400, detail="Geçersiz veya kullanılmış davet kodu")
+        raise HTTPException(status_code=400, detail="Invalid or already used invite code")
 
-    # Email/username duplicate kontrol
+    # Check for duplicate email/username
     existing = await db.execute(
         select(User).where((User.email == req.email) | (User.username == req.username))
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Bu email veya kullanıcı adı zaten kayıtlı")
+        raise HTTPException(status_code=400, detail="Email or username already taken")
 
     user = User(
         email=req.email,
@@ -63,7 +63,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     invite.use_count += 1
     await db.commit()
-    return {"message": "Kayıt başarılı"}
+    return {"message": "Registration successful"}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -76,7 +76,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalar_one_or_none()
     if not user or not verify_password(req.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Kullanıcı adı/email veya şifre hatalı")
+        raise HTTPException(status_code=401, detail="Invalid username/email or password")
 
     return TokenResponse(
         access_token=create_access_token(user.id),
@@ -93,15 +93,15 @@ async def refresh(req: RefreshRequest, db: AsyncSession = Depends(get_db)):
     try:
         payload = jwt.decode(req.refresh_token, settings.jwt_secret, algorithms=["HS256"])
         if payload.get("type") != "refresh":
-            raise HTTPException(status_code=401, detail="Geçersiz token")
+            raise HTTPException(status_code=401, detail="Invalid token")
         user_id = payload.get("sub")
     except JWTError:
-        raise HTTPException(status_code=401, detail="Geçersiz token")
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id), User.is_active == True))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=401, detail="Kullanıcı bulunamadı")
+        raise HTTPException(status_code=401, detail="User not found")
 
     return TokenResponse(
         access_token=create_access_token(user.id),

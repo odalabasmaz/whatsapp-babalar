@@ -34,7 +34,7 @@ async def setup(email: str, username: str, password: str):
             email=email,
             username=username,
             password_hash=hash_password(password),
-            is_admin=True,
+            role="admin",
         )
         db.add(admin)
 
@@ -42,8 +42,8 @@ async def setup(email: str, username: str, password: str):
         db.add(InviteCode(code=code, max_uses=50))
 
         await db.commit()
-        print(f"Setup tamamlandı.")
-        print(f"İlk davet kodu: {code}")
+        print(f"Setup complete.")
+        print(f"First invite code: {code}")
 
 
 if __name__ == "__main__":

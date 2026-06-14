@@ -1,7 +1,8 @@
+const fs = require("fs");
 const cron = require("node-cron");
 const { initWhatsApp } = require("./whatsapp");
 const { runIngestion } = require("./scheduler");
-const { checkTrigger } = require("./api-client");
+const { checkTrigger, checkReconnect } = require("./api-client");
 
 const CRON = process.env.INGEST_CRON || "0 2 * * *";
 const POLL_INTERVAL_MS = 30_000;
@@ -29,8 +30,17 @@ async function main() {
   console.log(`[babalar-ingestion] Cron scheduled: ${CRON}`);
   cron.schedule(CRON, () => safeRun("cron", null));
 
-  // Poll for manual triggers and new unprocessed groups
+  // Poll for manual triggers, new unprocessed groups, and reconnect requests
   setInterval(async () => {
+    try {
+      const { reconnect } = await checkReconnect();
+      if (reconnect) {
+        console.log("[babalar-ingestion] Reconnect requested — clearing session and restarting...");
+        try { fs.rmSync("./session", { recursive: true, force: true }); } catch (_) {}
+        process.exit(0);
+      }
+    } catch (_) {}
+
     if (isRunning) return;
     try {
       const { should_run, group_id } = await checkTrigger();

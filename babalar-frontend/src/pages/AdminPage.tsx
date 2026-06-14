@@ -153,6 +153,8 @@ export default function AdminPage() {
   const { data: groups } = useQuery({ queryKey: ["admin-groups"], queryFn: () => api.get("/admin/groups").then((r) => r.data), refetchInterval: activeTab === "groups" ? 10000 : false });
   const { data: users } = useQuery({ queryKey: ["admin-users"], queryFn: () => api.get("/admin/users").then((r) => r.data) });
   const { data: qrData } = useQuery({ queryKey: ["admin-qr"], queryFn: () => api.get("/admin/qr").then((r) => r.data), refetchInterval: activeTab === "groups" ? 5000 : false });
+  const { data: waStatus } = useQuery({ queryKey: ["whatsapp-status"], queryFn: () => api.get("/admin/whatsapp/status").then((r) => r.data), refetchInterval: activeTab === "groups" ? 10000 : false });
+  const reconnectWA = useMutation({ mutationFn: () => api.post("/admin/whatsapp/reconnect"), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-qr"] }); qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); } });
 
   const filterPreset = config?.group_filter_preset || "";
   const filteredGroups = useMemo(() => {
@@ -350,7 +352,28 @@ export default function AdminPage() {
             <div className="space-y-4 max-w-5xl">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">WhatsApp Grupları</h2>
-                <span className="text-xs text-gray-400">Aktif olanların mesajları çekilir</span>
+                <div className="flex items-center gap-3">
+                  {/* WhatsApp connection status */}
+                  {(() => {
+                    const status = qrData?.data_url ? "waiting_qr" : (waStatus?.status ?? "unknown");
+                    const badge: Record<string, { dot: string; label: string; cls: string }> = {
+                      connected:   { dot: "🟢", label: "Bağlı",          cls: "text-green-600 dark:text-green-400" },
+                      waiting_qr:  { dot: "🟡", label: "QR Bekleniyor",  cls: "text-yellow-600 dark:text-yellow-400" },
+                      disconnected:{ dot: "🔴", label: "Bağlantı Kesik", cls: "text-red-500 dark:text-red-400" },
+                      auth_failure:{ dot: "🔴", label: "Auth Hatası",    cls: "text-red-500 dark:text-red-400" },
+                      unknown:     { dot: "⚪", label: "Bilinmiyor",     cls: "text-gray-400" },
+                    };
+                    const b = badge[status] ?? badge.unknown;
+                    return <span className={`text-xs font-medium ${b.cls}`}>{b.dot} WhatsApp: {b.label}</span>;
+                  })()}
+                  <button
+                    onClick={() => { if (confirm("WhatsApp oturumu sıfırlanacak ve yeni QR kodu oluşturulacak. Devam?")) reconnectWA.mutate(); }}
+                    disabled={reconnectWA.isPending}
+                    className="px-3 py-1.5 rounded-xl text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 disabled:opacity-50 transition-colors"
+                  >
+                    ↺ Yeniden Bağlan
+                  </button>
+                </div>
               </div>
 
               {qrData?.data_url && (
