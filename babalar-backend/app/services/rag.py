@@ -239,8 +239,11 @@ async def answer(db: AsyncSession, question: str, history: list[dict] | None = N
             )
             raw = response.choices[0].message.content
             parsed = json.loads(raw)
-            answer_text = parsed.get("answer", "Bu konuda toplulukta yeterli bilgi bulamadım.")
             found = parsed.get("found", False)
+            answer_text = (parsed.get("answer") or "").strip()
+            # Model sometimes leaves "answer" blank when found=false instead of writing a message.
+            if not found or not answer_text:
+                answer_text = "Bu konuda toplulukta yeterli bilgi bulamadım."
             return {"answer": answer_text, "sources": sources if found else []}  # reasoning is internal, not returned
         except RateLimitError as e:
             if "requests per day" in str(e) or "RPD" in str(e):
