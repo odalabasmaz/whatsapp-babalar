@@ -224,6 +224,11 @@ export default function AdminPage() {
   const deleteGroupMessages = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/groups/${id}/messages`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-groups"] }),
+    onError: (err: any) => alert("Silme başarısız: " + (err.response?.data?.detail || err.message)),
+  });
+  const cancelIngestion = useMutation({
+    mutationFn: () => api.post("/admin/ingestion/cancel"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-groups"] }),
   });
   const updateUserRole = useMutation({
     mutationFn: ({ id, role }: { id: string; role: string }) => api.put(`/admin/users/${id}/role`, { role }),
@@ -492,17 +497,29 @@ export default function AdminPage() {
                           </td>
                           <td className="px-3 py-2.5 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => fetchGroup.mutate(g.id)}
-                                title="Veri çek (son tarihten itibaren)"
-                                className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                              >
-                                ↓ Çek
-                              </button>
+                              {g.is_ingesting ? (
+                                <button
+                                  onClick={() => cancelIngestion.mutate()}
+                                  disabled={cancelIngestion.isPending}
+                                  title="Çalışan ingestion'ı durdur"
+                                  className="px-2 py-1 rounded-full text-xs font-medium bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50 disabled:opacity-50 transition-colors"
+                                >
+                                  ✕ İptal
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => fetchGroup.mutate(g.id)}
+                                  title="Veri çek (son tarihten itibaren)"
+                                  className="px-2 py-1 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                                >
+                                  ↓ Çek
+                                </button>
+                              )}
                               <button
                                 onClick={() => { if (confirm(`"${g.name}" grubuna ait TÜM mesajlar silinecek. Emin misiniz?`)) deleteGroupMessages.mutate(g.id); }}
-                                title="Tüm mesajları sil"
-                                className="px-2 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                                disabled={g.is_ingesting}
+                                title={g.is_ingesting ? "Çekilirken silinemez" : "Tüm mesajları sil"}
+                                className="px-2 py-1 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                               >
                                 🗑
                               </button>

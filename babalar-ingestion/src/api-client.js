@@ -75,4 +75,13 @@ async function postLog(level, message) {
   } catch (_) {}
 }
 
-module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR, checkReconnect, setWhatsAppStatus, postLog };
+async function checkCancel() {
+  try {
+    const res = await http.get("/api/ingest/cancel-requested", { timeout: 5000 });
+    return res.data.cancel === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+module.exports = { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, checkTrigger, clearForceRun, setIngestionStatus, setQR, clearQR, checkReconnect, setWhatsAppStatus, postLog, checkCancel };

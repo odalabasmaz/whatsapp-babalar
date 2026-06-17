@@ -341,3 +341,12 @@ async def reset_ingestion_status(db: AsyncSession = Depends(get_db), _: User = D
         await db.delete(row)
         await db.commit()
     return {"ok": True}
+
+
+@router.post("/ingestion/cancel")
+async def cancel_ingestion(db: AsyncSession = Depends(get_db), _: User = Depends(get_admin_user)):
+    row = await db.get(AdminConfig, "cancel_requested")
+    if not row:
+        db.add(AdminConfig(key="cancel_requested", value="1"))
+    await db.commit()
+    return {"ok": True}

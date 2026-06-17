@@ -158,6 +158,16 @@ async def post_log(entry: LogEntry, _: None = Depends(verify_ingest_key)):
     return {"ok": True}
 
 
+@router.get("/cancel-requested")
+async def check_cancel(db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
+    row = await db.get(AdminConfig, "cancel_requested")
+    if row:
+        await db.delete(row)
+        await db.commit()
+        return {"cancel": True}
+    return {"cancel": False}
+
+
 @router.post("/clear-force-run")
 async def clear_force_run(db: AsyncSession = Depends(get_db), _: None = Depends(verify_ingest_key)):
     force = await db.get(AdminConfig, "force_run")

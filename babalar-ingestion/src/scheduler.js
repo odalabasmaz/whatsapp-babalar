@@ -1,5 +1,5 @@
 const { streamGroupMessages } = require("./whatsapp");
-const { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, clearForceRun, setIngestionStatus, postLog } = require("./api-client");
+const { discoverGroups, getActiveGroups, sendMessages, markGroupChecked, getIngestConfig, clearForceRun, setIngestionStatus, postLog, checkCancel } = require("./api-client");
 
 const BATCH_SIZE = 100;
 
@@ -74,6 +74,11 @@ async function runIngestion(client, targetGroupId = null) {
   }
 
   for (const group of groupsToProcess) {
+    if (await checkCancel()) {
+      logWarn("[scheduler] Cancel requested — stopping ingestion.");
+      break;
+    }
+
     const chat = chatMap[group.wa_group_id];
     if (!chat) {
       logWarn(`[scheduler] "${group.group_name}" not found in WhatsApp, skipping.`);
