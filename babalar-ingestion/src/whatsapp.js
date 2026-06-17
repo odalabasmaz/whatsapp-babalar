@@ -95,30 +95,45 @@ async function initWhatsApp() {
   return client;
 }
 
-// Fetch messages available in the current WhatsApp web session's in-memory cache.
-// whatsapp-web.js only has access to messages WhatsApp web has loaded — typically the last
-// ~50–100 per group on fresh connection. loadEarlierMsgs only works for actively viewed chats.
+// Fetch messages from a group, loading incrementally until we reach the `since` date.
+// Avoids loading the entire history at once which can OOM the browser on t4g.small (2GB RAM).
 async function* streamGroupMessages(chat, since) {
   const PAGE_SIZE = 100;
+  const STEP = 500;       // messages to add each round
+  const MAX_MSGS = 20000; // hard ceiling — ~200 days for a 100 msg/day group
+  const sinceTs = Math.floor(since.getTime() / 1000); // WA timestamps are in seconds
 
-  // Large limit so fetchMessages calls loadEarlierMsgs repeatedly until it runs out of history.
-  // 200k covers ~10 years even for very active groups; WhatsApp stops loading when history is exhausted.
-  const all = await chat.fetchMessages({ limit: 200000 });
+  let all = [];
+  let limit = STEP;
+
+  while (limit <= MAX_MSGS) {
+    const batch = await chat.fetchMessages({ limit });
+    // fetchMessages returns in chronological order; batch[0] is oldest
+    const oldestTs = batch.length ? batch[0].timestamp : Infinity;
+    const prevLen = all.length;
+    all = batch;
+
+    console.log(`[whatsapp] "${chat.name}": loaded ${batch.length} (limit=${limit}), oldest=${new Date(oldestTs * 1000).toISOString().slice(0, 10)}`);
+
+    // Stop if we've reached or passed the since date, or no new messages came in
+    if (oldestTs <= sinceTs || batch.length === prevLen || batch.length < limit) break;
+
+    limit += STEP;
+  }
 
   const filtered = [];
   for (const msg of all) {
-    const msgDate = new Date(msg.timestamp * 1000);
-    if (msgDate <= since) continue;
+    if (msg.timestamp <= sinceTs) continue;
     if (msg.body && msg.body.trim().length >= 10) {
       filtered.push({
         sender_name: msg._data.notifyName || msg.author || null,
         content: msg.body,
-        sent_at: msgDate.toISOString(),
+        sent_at: new Date(msg.timestamp * 1000).toISOString(),
       });
     }
   }
 
-  console.log(`[whatsapp] "${chat.name}": ${all.length} in cache, ${filtered.length} new after ${since.toISOString().slice(0,10)}.`);
+  console.log(`[whatsapp] "${chat.name}": ${all.length} in cache, ${filtered.length} new after ${since.toISOString().slice(0, 10)}.`);
 
   for (let i = 0; i < filtered.length; i += PAGE_SIZE) {
     yield filtered.slice(i, i + PAGE_SIZE);
