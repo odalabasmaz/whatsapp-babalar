@@ -97,7 +97,7 @@ async function initWhatsApp() {
 
 // Fetch messages from a group, loading incrementally until we reach the `since` date.
 // Avoids loading the entire history at once which can OOM the browser on t4g.small (2GB RAM).
-async function* streamGroupMessages(chat, since) {
+async function* streamGroupMessages(chat, since, cancelFn) {
   const PAGE_SIZE = 100;
   const STEP = 500;       // messages to add each round
   const MAX_MSGS = 20000; // hard ceiling — ~200 days for a 100 msg/day group
@@ -107,6 +107,12 @@ async function* streamGroupMessages(chat, since) {
   let limit = STEP;
 
   while (limit <= MAX_MSGS) {
+    // Check cancel between each batch so we don't block indefinitely
+    if (cancelFn && await cancelFn()) {
+      console.log(`[whatsapp] "${chat.name}": cancel detected mid-fetch, stopping.`);
+      throw new Error("CANCELLED");
+    }
+
     const batch = await chat.fetchMessages({ limit });
     // fetchMessages returns in chronological order; batch[0] is oldest
     const oldestTs = batch.length ? batch[0].timestamp : Infinity;

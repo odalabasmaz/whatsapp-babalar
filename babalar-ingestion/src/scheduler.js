@@ -75,8 +75,8 @@ async function runIngestion(client, targetGroupId = null) {
 
   for (const group of groupsToProcess) {
     if (await checkCancel()) {
-      logWarn("[scheduler] Cancel requested — stopping ingestion.");
-      break;
+      logWarn("[scheduler] Cancel requested — exiting process for immediate stop.");
+      process.exit(0);
     }
 
     const chat = chatMap[group.wa_group_id];
@@ -97,7 +97,7 @@ async function runIngestion(client, targetGroupId = null) {
       let totalSaved = 0;
       let pageCount = 0;
 
-      for await (const page of streamGroupMessages(chat, since)) {
+      for await (const page of streamGroupMessages(chat, since, checkCancel)) {
         pageCount++;
         totalFetched += page.length;
 
@@ -120,6 +120,10 @@ async function runIngestion(client, targetGroupId = null) {
       }
       await markGroupChecked(group.wa_group_id, group.group_name, runStartTime);
     } catch (err) {
+      if (err.message === "CANCELLED") {
+        logWarn(`[scheduler] "${group.group_name}": cancelled — exiting process.`);
+        process.exit(0);
+      }
       logError(`[scheduler] Error processing "${group.group_name}": ${err.message}`);
     } finally {
       await setIngestionStatus(null).catch(() => {});
