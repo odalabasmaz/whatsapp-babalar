@@ -159,6 +159,9 @@ export default function AdminPage() {
   const { data: waStatus } = useQuery({ queryKey: ["whatsapp-status"], queryFn: () => api.get("/admin/whatsapp/status").then((r) => r.data), refetchInterval: activeTab === "groups" ? 10000 : false });
   const reconnectWA = useMutation({ mutationFn: () => api.post("/admin/whatsapp/reconnect"), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-qr"] }); qc.invalidateQueries({ queryKey: ["whatsapp-status"] }); } });
   const { data: logs, dataUpdatedAt: logsUpdatedAt } = useQuery({ queryKey: ["ingestion-logs"], queryFn: () => api.get("/admin/logs").then((r) => r.data as { ts: string; level: string; msg: string }[]), refetchInterval: activeTab === "logs" ? 3000 : false });
+  const [logFilter, setLogFilter] = useState("");
+  const [logLevel, setLogLevel] = useState<"ALL" | "INFO" | "WARN" | "ERROR">("ALL");
+  const resetStatus = useMutation({ mutationFn: () => api.post("/admin/ingestion/reset-status"), onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-groups"] }) });
 
   const filterPreset = config?.group_filter_preset || "";
   const presetTerms = useMemo(
@@ -713,44 +716,94 @@ export default function AdminPage() {
               </div>
             </div>
           )}
-          {activeTab === "logs" && (
-            <div className="p-4 sm:p-6 flex flex-col gap-4 h-full overflow-hidden">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ingestion Logları</h2>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Her 3 saniyede güncellenir · Son güncelleme: {logsUpdatedAt ? new Date(logsUpdatedAt).toLocaleTimeString("tr-TR") : "—"}
-                  </p>
+          {activeTab === "logs" && (() => {
+            const filterLower = logFilter.toLowerCase();
+            const filtered = [...(logs || [])]
+              .reverse()
+              .filter(e => (logLevel === "ALL" || e.level === logLevel) && (!filterLower || e.msg.toLowerCase().includes(filterLower)));
+            return (
+              <div className="p-4 sm:p-6 flex flex-col gap-3 h-full overflow-hidden">
+                {/* Header row */}
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Ingestion Logları</h2>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {filtered.length}/{(logs || []).length} satır · {logsUpdatedAt ? new Date(logsUpdatedAt).toLocaleTimeString("tr-TR") : "—"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => resetStatus.mutate()}
+                      disabled={resetStatus.isPending}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors border border-red-200 dark:border-red-800"
+                      title="Takılı kalan 'İşleniyor' durumunu sıfırlar"
+                    >
+                      ⚠ Durumu Sıfırla
+                    </button>
+                    <button
+                      onClick={() => qc.invalidateQueries({ queryKey: ["ingestion-logs"] })}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                    >
+                      ↻ Yenile
+                    </button>
+                  </div>
                 </div>
-                <button
-                  onClick={() => qc.invalidateQueries({ queryKey: ["ingestion-logs"] })}
-                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                >
-                  ↻ Yenile
-                </button>
+
+                {/* Filters */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="text"
+                    placeholder="Grup adı veya mesaj ara..."
+                    value={logFilter}
+                    onChange={e => setLogFilter(e.target.value)}
+                    className="flex-1 min-w-[180px] px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                  {(["ALL", "INFO", "WARN", "ERROR"] as const).map(lvl => (
+                    <button
+                      key={lvl}
+                      onClick={() => setLogLevel(lvl)}
+                      className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${logLevel === lvl
+                        ? lvl === "ERROR" ? "bg-red-500 text-white"
+                          : lvl === "WARN" ? "bg-yellow-500 text-white"
+                          : lvl === "INFO" ? "bg-green-500 text-white"
+                          : "bg-gray-700 text-white"
+                        : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"}`}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Log output */}
+                <div className="flex-1 overflow-y-auto bg-gray-900 dark:bg-black rounded-xl border border-gray-700 dark:border-gray-800 p-3 font-mono text-xs leading-5">
+                  {!filtered.length && (
+                    <p className="text-gray-500 italic p-2">{logs?.length ? "Filtre eşleşmedi." : "Henüz log yok."}</p>
+                  )}
+                  {filtered.map((entry, i) => {
+                    const levelCls = entry.level === "ERROR" ? "text-red-400" : entry.level === "WARN" ? "text-yellow-400" : "text-green-400";
+                    const time = new Date(entry.ts).toLocaleTimeString("tr-TR", { hour12: false });
+                    const dateStr = new Date(entry.ts).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
+                    const highlighted = filterLower
+                      ? entry.msg.replace(new RegExp(`(${filterLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "|||$1|||")
+                      : entry.msg;
+                    return (
+                      <div key={i} className="flex gap-2 py-0.5 border-b border-gray-800 last:border-0">
+                        <span className="text-gray-500 flex-shrink-0 w-[105px]">{dateStr} {time}</span>
+                        <span className={`flex-shrink-0 w-10 font-bold ${levelCls}`}>{entry.level.slice(0, 4)}</span>
+                        <span className="text-gray-200 break-all">
+                          {highlighted.split("|||").map((part, j) =>
+                            j % 2 === 1
+                              ? <mark key={j} className="bg-yellow-400 text-black rounded px-0.5">{part}</mark>
+                              : part
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto bg-gray-900 dark:bg-black rounded-xl border border-gray-700 dark:border-gray-800 p-3 font-mono text-xs leading-5">
-                {!logs?.length && (
-                  <p className="text-gray-500 italic p-2">Henüz log yok. İlk ingestion çalıştıktan sonra burada görünecek.</p>
-                )}
-                {[...(logs || [])].reverse().map((entry, i) => {
-                  const levelCls =
-                    entry.level === "ERROR" ? "text-red-400" :
-                    entry.level === "WARN" ? "text-yellow-400" :
-                    "text-green-400";
-                  const time = new Date(entry.ts).toLocaleTimeString("tr-TR", { hour12: false });
-                  const date = new Date(entry.ts).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
-                  return (
-                    <div key={i} className="flex gap-2 py-0.5 border-b border-gray-800 last:border-0">
-                      <span className="text-gray-500 flex-shrink-0 w-[105px]">{date} {time}</span>
-                      <span className={`flex-shrink-0 w-10 font-bold ${levelCls}`}>{entry.level.slice(0, 4)}</span>
-                      <span className="text-gray-200 break-all">{entry.msg}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </main>
       </div>
       <div className="text-center py-2 text-xs text-gray-400 dark:text-gray-600 select-none">

@@ -31,6 +31,9 @@ async function main() {
     }
   }
 
+  // Clear any stuck "İşleniyor" status left over from a previous crashed run
+  await setIngestionStatus(null).catch(() => {});
+
   console.log(`[babalar-ingestion] Cron scheduled: ${CRON}`);
   postLog("INFO", `[babalar-ingestion] WhatsApp connected. Cron: ${CRON}`).catch(() => {});
   cron.schedule(CRON, () => safeRun("cron", null));

@@ -332,3 +332,12 @@ async def user_stats(db: AsyncSession = Depends(get_db), _: User = Depends(get_a
 async def get_ingestion_logs(_: User = Depends(get_admin_user)):
     from app.services.log_buffer import get_logs
     return get_logs()
+
+
+@router.post("/ingestion/reset-status")
+async def reset_ingestion_status(db: AsyncSession = Depends(get_db), _: User = Depends(get_admin_user)):
+    row = await db.get(AdminConfig, "ingesting_group_wa_id")
+    if row:
+        await db.delete(row)
+        await db.commit()
+    return {"ok": True}
