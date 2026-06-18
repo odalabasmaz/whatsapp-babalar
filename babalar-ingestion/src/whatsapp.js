@@ -107,13 +107,27 @@ async function* streamGroupMessages(chat, since, cancelFn) {
   let limit = STEP;
 
   while (limit <= MAX_MSGS) {
-    // Check cancel between each batch so we don't block indefinitely
-    if (cancelFn && await cancelFn()) {
-      console.log(`[whatsapp] "${chat.name}": cancel detected mid-fetch, stopping.`);
-      throw new Error("CANCELLED");
-    }
+    // Race fetchMessages against a periodic cancel poll (every 3s)
+    // so cancel fires even while a single batch is in-flight.
+    let pollTimer;
+    const cancelRace = cancelFn
+      ? new Promise((_, reject) => {
+          const poll = async () => {
+            if (await cancelFn()) { reject(new Error("CANCELLED")); return; }
+            pollTimer = setTimeout(poll, 3000);
+          };
+          pollTimer = setTimeout(poll, 3000);
+        })
+      : null;
 
-    const batch = await chat.fetchMessages({ limit });
+    let batch;
+    try {
+      batch = cancelRace
+        ? await Promise.race([chat.fetchMessages({ limit }), cancelRace])
+        : await chat.fetchMessages({ limit });
+    } finally {
+      clearTimeout(pollTimer);
+    }
     // fetchMessages returns in chronological order; batch[0] is oldest
     const oldestTs = batch.length ? batch[0].timestamp : Infinity;
     const prevLen = all.length;

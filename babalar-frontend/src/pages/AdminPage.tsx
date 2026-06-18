@@ -798,8 +798,8 @@ export default function AdminPage() {
                   )}
                   {filtered.map((entry, i) => {
                     const levelCls = entry.level === "ERROR" ? "text-red-400" : entry.level === "WARN" ? "text-yellow-400" : "text-green-400";
-                    const time = new Date(entry.ts).toLocaleTimeString("tr-TR", { hour12: false });
-                    const dateStr = new Date(entry.ts).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
+                    const time = new Date(entry.ts).toLocaleTimeString("tr-TR", { hour12: false, timeZone: "Europe/Berlin" });
+                    const dateStr = new Date(entry.ts).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
                     const highlighted = filterLower
                       ? entry.msg.replace(new RegExp(`(${filterLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "|||$1|||")
                       : entry.msg;
