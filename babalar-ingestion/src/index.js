@@ -2,7 +2,7 @@ const fs = require("fs");
 const cron = require("node-cron");
 const { initWhatsApp } = require("./whatsapp");
 const { runIngestion } = require("./scheduler");
-const { checkTrigger, checkReconnect, postLog } = require("./api-client");
+const { checkTrigger, checkReconnect, postLog, setIngestionStatus } = require("./api-client");
 
 const CRON = process.env.INGEST_CRON || "0 2 * * *";
 const POLL_INTERVAL_MS = 30_000;
