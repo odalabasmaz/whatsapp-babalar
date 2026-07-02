@@ -1,15 +1,18 @@
 import asyncio
 import json
 import re
+from contextlib import nullcontext
 from datetime import timedelta
 
-from openai import AsyncOpenAI, RateLimitError
+from openai import RateLimitError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import settings  # noqa: F401  (sets LANGFUSE_TRACING_ENABLED before langfuse import)
 from app.models.models import AdminConfig
 from app.services.embedding import embed
+from langfuse import get_client, observe, propagate_attributes
+from langfuse.openai import AsyncOpenAI
 
 _LID_RE = re.compile(r"^\d+@lid$")
 
@@ -96,6 +99,7 @@ async def _preprocess(question: str, history: list[dict]) -> tuple[str, str]:
                 {"role": "system", "content": _PREPROCESS_SYSTEM},
                 {"role": "user", "content": user_content},
             ],
+            name="preprocess-query",
         )
         parsed = json.loads(resp.choices[0].message.content)
         corrected = parsed.get("corrected", question).strip() or question
@@ -140,114 +144,129 @@ async def _fetch_thread_context(db: AsyncSession, top_results: list) -> list:
     return thread_rows
 
 
-async def answer(db: AsyncSession, question: str, history: list[dict] | None = None) -> dict:
+@observe(name="rag-answer", capture_input=False, capture_output=False)
+async def answer(db: AsyncSession, question: str, history: list[dict] | None = None, user_id: str | None = None) -> dict:
     history = history or []
-    normalized, search_query = await _preprocess(question, history)
+    langfuse = get_client()
+    langfuse.update_current_span(input={"question": question, "history_turns": len(history)})
 
-    top_k = await _get_top_k(db)
-    query_embedding = await embed(search_query)
+    attrs = propagate_attributes(user_id=user_id, tags=["rag"]) if user_id else nullcontext()
+    with attrs:
+        normalized, search_query = await _preprocess(question, history)
 
-    rows = await db.execute(
-        text("""
-            SELECT m.id, m.group_id, m.content, m.sender_name, m.sent_at, m.category, g.group_name,
-                   1 - (m.embedding <=> CAST(:emb AS vector)) AS similarity
-            FROM messages m
-            JOIN wa_groups g ON g.id = m.group_id
-            WHERE m.embedding IS NOT NULL
-              AND length(m.content) >= 40
-            ORDER BY m.embedding <=> CAST(:emb AS vector)
-            LIMIT :k
-        """),
-        {"emb": str(query_embedding), "k": top_k},
-    )
-    results = rows.fetchall()
+        top_k = await _get_top_k(db)
+        query_embedding = await embed(search_query)
 
-    # Filter out low-similarity results to reduce noise in the LLM context
-    results = [r for r in results if r.similarity >= 0.45]
+        with langfuse.start_as_current_observation(
+            as_type="span",
+            name="pgvector-search",
+            input={"search_query": search_query, "top_k": top_k},
+        ) as search_span:
+            rows = await db.execute(
+                text("""
+                    SELECT m.id, m.group_id, m.content, m.sender_name, m.sent_at, m.category, g.group_name,
+                           1 - (m.embedding <=> CAST(:emb AS vector)) AS similarity
+                    FROM messages m
+                    JOIN wa_groups g ON g.id = m.group_id
+                    WHERE m.embedding IS NOT NULL
+                      AND length(m.content) >= 40
+                    ORDER BY m.embedding <=> CAST(:emb AS vector)
+                    LIMIT :k
+                """),
+                {"emb": str(query_embedding), "k": top_k},
+            )
+            results = rows.fetchall()
 
-    if not results:
-        return {"answer": "Bu konuda toplulukta yeterli bilgi bulamadım.", "sources": []}
+            # Filter out low-similarity results to reduce noise in the LLM context
+            results = [r for r in results if r.similarity >= 0.45]
+            search_span.update(output={"result_count": len(results)})
 
-    # Expand each top result with its conversation thread neighbors
-    thread_neighbors = await _fetch_thread_context(db, results)
+        if not results:
+            langfuse.update_current_span(output={"found": False, "reason": "no_similarity_matches"})
+            return {"answer": "Bu konuda toplulukta yeterli bilgi bulamadım.", "sources": []}
 
-    # Merge: top results + thread neighbors, deduplicate by message id
-    result_ids = {r.id for r in results}
-    result_sims = {r.id: r.similarity for r in results}
-    extra = [n for n in thread_neighbors if n.id not in result_ids]
-    all_msgs = results + extra
+        # Expand each top result with its conversation thread neighbors
+        thread_neighbors = await _fetch_thread_context(db, results)
 
-    # Group into conversation clusters: same group, messages within 10 minutes of each other
-    all_msgs_sorted = sorted(all_msgs, key=lambda r: (r.group_name, r.sent_at))
-    clusters: list[list] = []
-    current: list = []
-    for msg in all_msgs_sorted:
-        if not current:
-            current.append(msg)
-        else:
-            last = current[-1]
-            gap = abs((msg.sent_at - last.sent_at).total_seconds())
-            if msg.group_name == last.group_name and gap <= 600:
+        # Merge: top results + thread neighbors, deduplicate by message id
+        result_ids = {r.id for r in results}
+        result_sims = {r.id: r.similarity for r in results}
+        extra = [n for n in thread_neighbors if n.id not in result_ids]
+        all_msgs = results + extra
+
+        # Group into conversation clusters: same group, messages within 10 minutes of each other
+        all_msgs_sorted = sorted(all_msgs, key=lambda r: (r.group_name, r.sent_at))
+        clusters: list[list] = []
+        current: list = []
+        for msg in all_msgs_sorted:
+            if not current:
                 current.append(msg)
             else:
-                clusters.append(current)
-                current = [msg]
-    if current:
-        clusters.append(current)
+                last = current[-1]
+                gap = abs((msg.sent_at - last.sent_at).total_seconds())
+                if msg.group_name == last.group_name and gap <= 600:
+                    current.append(msg)
+                else:
+                    clusters.append(current)
+                    current = [msg]
+        if current:
+            clusters.append(current)
 
-    # Sort clusters by their highest similarity score (most relevant first)
-    def cluster_score(c: list) -> float:
-        return max(result_sims.get(m.id, 0.0) for m in c)
+        # Sort clusters by their highest similarity score (most relevant first)
+        def cluster_score(c: list) -> float:
+            return max(result_sims.get(m.id, 0.0) for m in c)
 
-    clusters.sort(key=cluster_score, reverse=True)
+        clusters.sort(key=cluster_score, reverse=True)
 
-    seen_groups: dict[str, str] = {}
-    context_parts = []
-    for cluster in clusters:
-        date_str = cluster[0].sent_at.strftime("%d.%m.%Y")
-        group_name = cluster[0].group_name
-        header = f"=== {group_name} | {date_str} ==="
-        lines = [header]
-        for msg in cluster:
-            sender = "Anonim" if not msg.sender_name or _LID_RE.match(msg.sender_name) else msg.sender_name
-            time_str = msg.sent_at.strftime("%H:%M")
-            lines.append(f"[{time_str} | {sender}] {msg.content}")
-            sim = result_sims.get(msg.id, 0.0)
-            if sim >= 0.52 and group_name not in seen_groups:
-                seen_groups[group_name] = date_str
-        context_parts.append("\n".join(lines))
+        seen_groups: dict[str, str] = {}
+        context_parts = []
+        for cluster in clusters:
+            date_str = cluster[0].sent_at.strftime("%d.%m.%Y")
+            group_name = cluster[0].group_name
+            header = f"=== {group_name} | {date_str} ==="
+            lines = [header]
+            for msg in cluster:
+                sender = "Anonim" if not msg.sender_name or _LID_RE.match(msg.sender_name) else msg.sender_name
+                time_str = msg.sent_at.strftime("%H:%M")
+                lines.append(f"[{time_str} | {sender}] {msg.content}")
+                sim = result_sims.get(msg.id, 0.0)
+                if sim >= 0.52 and group_name not in seen_groups:
+                    seen_groups[group_name] = date_str
+            context_parts.append("\n".join(lines))
 
-    sources = [{"group": g, "date": d} for g, d in seen_groups.items()]
-    context = "\n\n---\n\n".join(context_parts)
-    prompt = f"Community messages:\n\n{context}\n\nQuestion: {normalized}"
+        sources = [{"group": g, "date": d} for g, d in seen_groups.items()]
+        context = "\n\n---\n\n".join(context_parts)
+        prompt = f"Community messages:\n\n{context}\n\nQuestion: {normalized}"
 
-    # Build messages with conversation history so the LLM has full context
-    messages: list[dict] = [{"role": "system", "content": _SYSTEM}]
-    for h in history[-6:]:  # last 3 exchanges
-        if h.get("role") in ("user", "assistant"):
-            messages.append({"role": h["role"], "content": h["content"][:800]})
-    messages.append({"role": "user", "content": prompt})
+        # Build messages with conversation history so the LLM has full context
+        messages: list[dict] = [{"role": "system", "content": _SYSTEM}]
+        for h in history[-6:]:  # last 3 exchanges
+            if h.get("role") in ("user", "assistant"):
+                messages.append({"role": h["role"], "content": h["content"][:800]})
+        messages.append({"role": "user", "content": prompt})
 
-    for attempt in range(5):
-        try:
-            response = await _client.chat.completions.create(
-                model="gpt-4o-mini",
-                max_tokens=1800,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=messages,
-            )
-            raw = response.choices[0].message.content
-            parsed = json.loads(raw)
-            found = parsed.get("found", False)
-            answer_text = (parsed.get("answer") or "").strip()
-            # Model sometimes leaves "answer" blank when found=false instead of writing a message.
-            if not found or not answer_text:
-                answer_text = "Bu konuda toplulukta yeterli bilgi bulamadım."
-            return {"answer": answer_text, "sources": sources if found else []}  # reasoning is internal, not returned
-        except RateLimitError as e:
-            if "requests per day" in str(e) or "RPD" in str(e):
-                raise
-            if attempt == 4:
-                raise
-            await asyncio.sleep(2 ** attempt)
+        for attempt in range(5):
+            try:
+                response = await _client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    max_tokens=1800,
+                    temperature=0,
+                    response_format={"type": "json_object"},
+                    messages=messages,
+                    name="generate-answer",
+                )
+                raw = response.choices[0].message.content
+                parsed = json.loads(raw)
+                found = parsed.get("found", False)
+                answer_text = (parsed.get("answer") or "").strip()
+                # Model sometimes leaves "answer" blank when found=false instead of writing a message.
+                if not found or not answer_text:
+                    answer_text = "Bu konuda toplulukta yeterli bilgi bulamadım."
+                langfuse.update_current_span(output={"found": found, "source_count": len(sources)})
+                return {"answer": answer_text, "sources": sources if found else []}  # reasoning is internal, not returned
+            except RateLimitError as e:
+                if "requests per day" in str(e) or "RPD" in str(e):
+                    raise
+                if attempt == 4:
+                    raise
+                await asyncio.sleep(2 ** attempt)

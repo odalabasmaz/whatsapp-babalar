@@ -15,6 +15,7 @@ A RAG-based chatbot that indexes WhatsApp group conversations, stores them in a 
 - **Ingestion** — Node.js, whatsapp-web.js, cron-based
 - **LLM** — GPT-4o-mini (Q&A, categorization) + text-embedding-3-small
 - **Infra** — AWS (EC2, RDS PostgreSQL 16, CloudFront + S3), CDK (Python)
+- **Observability** — Langfuse (LLM tracing, optional)
 
 ---
 
@@ -76,6 +77,33 @@ On first connect, you need to scan a WhatsApp Web QR code. Two options:
 **AWS:** Admin panel → Groups tab → QR code appears on screen, scan with phone.
 
 If the connection drops, the ingestion container restarts automatically and generates a new QR.
+
+---
+
+## Observability (Langfuse)
+
+The RAG pipeline (`babalar-backend/app/services/rag.py`), categorizer, and embedding calls are instrumented with [Langfuse](https://langfuse.com) via the OpenAI drop-in wrapper. Tracing is optional — if no keys are set, it's a no-op.
+
+**Enable:**
+
+```bash
+# In .env
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com   # EU region (default); use https://us.cloud.langfuse.com for US
+```
+
+Keys are found in the Langfuse UI → **Settings → API Keys**. Restart the backend after changing `.env`.
+
+**What gets traced**, per query:
+
+- `rag-answer` — root trace, tagged with `user_id` for per-user filtering
+  - `preprocess-query` — GPT-4o-mini query rewrite/typo-fix generation
+  - `pgvector-search` — vector similarity search span (query, top_k, result count)
+  - `generate-answer` — final GPT-4o-mini answer generation
+- `categorize-batch` — one trace per ingestion categorization run (message/chunk counts, category distribution)
+
+View traces at your Langfuse project URL (cloud.langfuse.com or self-hosted).
 
 ---
 

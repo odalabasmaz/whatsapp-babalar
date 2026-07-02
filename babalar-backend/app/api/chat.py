@@ -55,7 +55,7 @@ async def ask(
         if not allowed:
             raise HTTPException(status_code=429, detail=reason)
 
-    result = await rag.answer(db, req.question, [h.model_dump() for h in req.history])
+    result = await rag.answer(db, req.question, [h.model_dump() for h in req.history], user_id=str(current_user.id))
     return result
 
 

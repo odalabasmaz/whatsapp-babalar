@@ -1,8 +1,10 @@
 import asyncio
 import json
 
-from openai import AsyncOpenAI, RateLimitError
-from app.config import settings
+from openai import RateLimitError
+from app.config import settings  # noqa: F401  (sets LANGFUSE_TRACING_ENABLED before langfuse import)
+from langfuse import get_client, observe
+from langfuse.openai import AsyncOpenAI
 
 _client = AsyncOpenAI(api_key=settings.openai_api_key)
 
@@ -65,7 +67,11 @@ async def categorize(content: str) -> str:
     return results[0]
 
 
+@observe(name="categorize-batch", capture_input=False, capture_output=False)
 async def categorize_batch(contents: list[str]) -> list[str]:
     chunks = [contents[i:i + _CHUNK_SIZE] for i in range(0, len(contents), _CHUNK_SIZE)]
+    get_client().update_current_span(input={"message_count": len(contents), "chunk_count": len(chunks)})
     results = await asyncio.gather(*[_categorize_chunk(chunk) for chunk in chunks])
-    return [cat for chunk_result in results for cat in chunk_result]
+    categories = [cat for chunk_result in results for cat in chunk_result]
+    get_client().update_current_span(output={"category_counts": {c: categories.count(c) for c in set(categories)}})
+    return categories

@@ -1,6 +1,5 @@
-from openai import AsyncOpenAI
-
-from app.config import settings
+from app.config import settings  # noqa: F401  (sets LANGFUSE_TRACING_ENABLED before langfuse import)
+from langfuse.openai import AsyncOpenAI
 
 _client = AsyncOpenAI(api_key=settings.openai_api_key)
 _MODEL = "text-embedding-3-small"
